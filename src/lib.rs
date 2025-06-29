@@ -113,7 +113,6 @@ pub fn generate_mixin(code: String) -> String {
             output.push_str("  }\n");
             
             // Generate copyWith method declaration in mixin
-            output.push_str("\n  @override\n");
             output.push_str(&format!("  {} copyWith({{", class.name));
             let copy_with_params: Vec<String> = all_fields
                 .iter()
@@ -144,7 +143,7 @@ pub fn generate_mixin(code: String) -> String {
                         }
                     })
                     .collect();
-                output.push_str(&format!("  {}const _{} ({{{}}}) : super._();\n", 
+                output.push_str(&format!("  {} _{} ({{{}}}) : super._();\n", 
                     const_keyword, class.name, named_params.join(", ")));
             } else if class.named_arguments.is_empty() {
                 // Only positional parameters
@@ -188,7 +187,7 @@ pub fn generate_mixin(code: String) -> String {
                         }
                     })
                     .collect();
-                output.push_str(&format!("  {}const _{} ({}, {{{}}}) : super._();\n", 
+                output.push_str(&format!("  {} _{} ({}, {{{}}}) : super._();\n", 
                     const_keyword, class.name, pos_params.join(", "), named_params.join(", ")));
             }
             

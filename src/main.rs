@@ -5,14 +5,15 @@ fn main() {
 @freezed
 abstract class Test with _$Test {
   factory Test({
-    required int test,
+    required int? test,
     required String asdf,
     @Default('asdfasdf') String asdf2,
     @Default(Duration.zero) Duration dur,
   }) = _Test;
   const Test._();
-  //factory Test.fromJson(Map<String, dynamic> json) => _$TestFromJson(json);
+
 }
+
 "#;
 
     let mixin_code = generate_mixin(dart_code.to_string());
