@@ -5,12 +5,15 @@ fn main() {
 @freezed
 abstract class Test with _$Test {
   factory Test({
-    required int x,
-    @Default('hello') String a,
-    @Default(42) int count,
+    required int test,
+    required String asdf,
+    @Default('asdfasdf') String asdf2,
+    @Default(Duration.zero) Duration dur,
   }) = _Test;
   Test._();
+  factory Test.fromJson(Map<String, dynamic> json) => _$TestFromJson(json);
 }
+
 "#;
 
     let classes = parse_freezed_classes(dart_code.to_string());

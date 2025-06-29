@@ -9,6 +9,7 @@ const CLASS_MEMBER_DEFINITION: &str = "(class_member_definition) @member";
 const REDIRECTING_FACTORY_CONSTRUCTOR_SIGNATURE: &str =
     "(redirecting_factory_constructor_signature) @constructor";
 const FORMAL_PARAMETER: &str = "(formal_parameter) @parameter";
+const UNNAMED_CONSTRUCTOR: &str = "(constructor_signature) @unnamed_constructor";
 
 lazy_static! {
     static ref DART_TS: tree_sitter::Language = tree_sitter_dart::language();
@@ -23,6 +24,8 @@ lazy_static! {
     .expect("hardcoded");
     static ref formal_parameter_q: tree_sitter::Query =
         tree_sitter::Query::new(&DART_TS, FORMAL_PARAMETER).expect("hardcoded");
+    static ref unnamed_constructor_q: tree_sitter::Query =
+        tree_sitter::Query::new(&DART_TS, UNNAMED_CONSTRUCTOR).expect("hardcoded");
 }
 
 /// Parse Dart code and extract all classes with @freezed annotation
@@ -50,6 +53,7 @@ pub fn parse_dart_code(code: &str) -> Vec<FreezedClass> {
         let mut positional_arguments = Vec::new();
         let mut named_arguments = Vec::new();
         let mut has_json = false;
+        let mut has_const_constructor = false;
         
         let mut class_query = QueryCursor::new();
         let mut executed_query = class_query.matches(&members_q, class_body, code.as_bytes());
@@ -61,6 +65,28 @@ pub fn parse_dart_code(code: &str) -> Vec<FreezedClass> {
             // Check if this is a fromJson constructor
             if declaration_text.contains("fromJson") {
                 has_json = true;
+                continue;
+            }
+            
+            // Check for unnamed constructor (._())
+            let mut unnamed_constructor_cursor = QueryCursor::new();
+            let mut unnamed_constructor_matches = unnamed_constructor_cursor.matches(
+                &unnamed_constructor_q,
+                declaration_node,
+                code.as_bytes(),
+            );
+            
+            if let Some(_unnamed_constructor) = unnamed_constructor_matches.next() {
+                // Check if the constructor has the const keyword
+                if declaration_text.contains("const") {
+                    has_const_constructor = true;
+                }
+                continue;
+            }
+            
+            // Alternative approach: look for the pattern "const ClassName._()"
+            if declaration_text.contains("const") && declaration_text.contains("._()") {
+                has_const_constructor = true;
                 continue;
             }
             
@@ -109,6 +135,7 @@ pub fn parse_dart_code(code: &str) -> Vec<FreezedClass> {
             optional_arguments: Vec::new(),
             named_arguments,
             has_json,
+            has_const_constructor,
         };
         
         freezed_classes.push(freezed_class);

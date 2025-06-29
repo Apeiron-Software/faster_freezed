@@ -116,6 +116,7 @@ pub fn generate_mixin(code: String) -> String {
             output.push_str("}\n\n");
             
             // Generate the class implementation
+            let const_keyword = if class.has_const_constructor { "const " } else { "" };
             output.push_str(&format!("class _{} extends {} {{\n", class.name, class.name));
             
             // Generate constructor
@@ -133,8 +134,8 @@ pub fn generate_mixin(code: String) -> String {
                         }
                     })
                     .collect();
-                output.push_str(&format!("  const _{} ({{{}}}) : super._();\n", 
-                    class.name, named_params.join(", ")));
+                output.push_str(&format!("  {}const _{} ({{{}}}) : super._();\n", 
+                    const_keyword, class.name, named_params.join(", ")));
             } else if class.named_arguments.is_empty() {
                 // Only positional parameters
                 let pos_params: Vec<String> = class.positional_arguments
@@ -149,8 +150,8 @@ pub fn generate_mixin(code: String) -> String {
                         }
                     })
                     .collect();
-                output.push_str(&format!("  const _{} ({}) : super._();\n", 
-                    class.name, pos_params.join(", ")));
+                output.push_str(&format!("  {}const _{} ({}) : super._();\n", 
+                    const_keyword, class.name, pos_params.join(", ")));
             } else {
                 // Both positional and named parameters
                 let pos_params: Vec<String> = class.positional_arguments
@@ -177,8 +178,8 @@ pub fn generate_mixin(code: String) -> String {
                         }
                     })
                     .collect();
-                output.push_str(&format!("  const _{} ({}, {{{}}}) : super._();\n", 
-                    class.name, pos_params.join(", "), named_params.join(", ")));
+                output.push_str(&format!("  {}const _{} ({}, {{{}}}) : super._();\n", 
+                    const_keyword, class.name, pos_params.join(", "), named_params.join(", ")));
             }
             
             output.push_str("\n");
@@ -225,6 +226,7 @@ class SimpleClass with _$SimpleClass {
         assert_eq!(class.positional_arguments.len(), 2);
         assert_eq!(class.named_arguments.len(), 0);
         assert_eq!(class.has_json, false);
+        assert_eq!(class.has_const_constructor, false);
         
         let name_arg = &class.positional_arguments[0];
         assert_eq!(name_arg.name, "name");
@@ -262,6 +264,7 @@ class NamedClass with _$NamedClass {
         assert_eq!(class.positional_arguments.len(), 0);
         assert_eq!(class.named_arguments.len(), 3);
         assert_eq!(class.has_json, false);
+        assert_eq!(class.has_const_constructor, false);
         
         let first_arg = &class.named_arguments[0];
         assert_eq!(first_arg.name, "firstName");
@@ -297,6 +300,7 @@ class AnnotatedClass with _$AnnotatedClass {
         let class = &classes[0];
         assert_eq!(class.name, "AnnotatedClass");
         assert_eq!(class.positional_arguments.len(), 2);
+        assert_eq!(class.has_const_constructor, false);
         
         let name_arg = &class.positional_arguments[0];
         assert_eq!(name_arg.name, "name");
@@ -334,6 +338,7 @@ class JsonClass with _$JsonClass {
         assert_eq!(class.name, "JsonClass");
         assert_eq!(class.has_json, true);
         assert_eq!(class.named_arguments.len(), 2);
+        assert_eq!(class.has_const_constructor, false);
     }
 
     #[test]
@@ -371,12 +376,14 @@ class Alien with _$Alien {
         assert_eq!(person.has_json, true);
         assert_eq!(person.positional_arguments.len(), 1);
         assert_eq!(person.named_arguments.len(), 3);
+        assert_eq!(person.has_const_constructor, false);
         
         let alien = &classes[1];
         assert_eq!(alien.name, "Alien");
         assert_eq!(alien.has_json, true);
         assert_eq!(alien.positional_arguments.len(), 0);
         assert_eq!(alien.named_arguments.len(), 3);
+        assert_eq!(alien.has_const_constructor, false);
     }
 
     #[test]
@@ -397,6 +404,7 @@ class TestClass with _$TestClass {
         let class = &classes[0];
         assert_eq!(class.name, "TestClass");
         assert_eq!(class.positional_arguments.len(), 1);
+        assert_eq!(class.has_const_constructor, false);
         
         let name_arg = &class.positional_arguments[0];
         assert_eq!(name_arg.name, "name");
@@ -404,6 +412,40 @@ class TestClass with _$TestClass {
         assert_eq!(name_arg.default_value, Some("test".to_string()));
         assert_eq!(name_arg.annotations.len(), 1);
         assert!(name_arg.annotations[0].contains("@Default"));
+    }
+
+    #[test]
+    fn test_parse_class_with_const_constructor() {
+        let code = r#"
+@freezed
+class ConstClass with _$ConstClass {
+  const factory ConstClass({
+    required String name,
+    int age,
+  }) = _ConstClass;
+  
+  const ConstClass._();
+}
+"#;
+        
+        let classes = parse_dart_code(code);
+        assert_eq!(classes.len(), 1);
+        
+        let class = &classes[0];
+        assert_eq!(class.name, "ConstClass");
+        assert_eq!(class.has_json, false);
+        assert_eq!(class.named_arguments.len(), 2);
+        assert_eq!(class.has_const_constructor, true);
+        
+        let name_arg = &class.named_arguments[0];
+        assert_eq!(name_arg.name, "name");
+        assert_eq!(name_arg.r#type, "String");
+        assert_eq!(name_arg.is_required, true);
+        
+        let age_arg = &class.named_arguments[1];
+        assert_eq!(age_arg.name, "age");
+        assert_eq!(age_arg.r#type, "int");
+        assert_eq!(age_arg.is_required, false);
     }
 
     #[test]
@@ -436,6 +478,26 @@ abstract class Test with _$Test {
         assert!(mixin_code.contains("class _Test extends Test {"));
         assert!(mixin_code.contains("const _Test ({required this.i, this.data = 'hello'}) : super._();"));
         assert!(mixin_code.contains("@override\n  final int i;"));
-        assert!(mixin_code.contains("@override\n  final String datak"));
+        assert!(mixin_code.contains("@override\n  final String data;"));
+    }
+
+    #[test]
+    fn test_generate_mixin_with_const_constructor() {
+        let code = r#"
+@freezed
+abstract class ConstTest with _$ConstTest {
+  factory ConstTest({required int i, @Default('hello') String data}) = _ConstTest;
+  const ConstTest._();
+  factory ConstTest.fromJson(Map<String, dynamic> json) => _$ConstTestFromJson(json);
+}
+"#;
+        
+        let mixin_code = generate_mixin(code.to_string());
+        
+        // Check that the class implementation contains const keyword
+        assert!(mixin_code.contains("class _ConstTest extends ConstTest {"));
+        assert!(mixin_code.contains("const _ConstTest ({required this.i, this.data = 'hello'}) : super._();"));
+        assert!(mixin_code.contains("@override\n  final int i;"));
+        assert!(mixin_code.contains("@override\n  final String data;"));
     }
 } 

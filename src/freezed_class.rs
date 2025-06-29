@@ -10,6 +10,7 @@ pub struct FreezedClass {
     pub optional_arguments: Vec<Argument>,
     pub named_arguments: Vec<Argument>,
     pub has_json: bool,
+    pub has_const_constructor: bool,
 }
 
 #[derive(Debug)]
