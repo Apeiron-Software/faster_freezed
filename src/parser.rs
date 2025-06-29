@@ -144,6 +144,81 @@ pub fn parse_dart_code(code: &str) -> Vec<FreezedClass> {
     freezed_classes
 }
 
+fn extract_type_string(node: tree_sitter::Node, text: &[u8]) -> String {
+    let kind = node.kind();
+    let node_text = node.utf8_text(text).unwrap_or("");
+    println!("DEBUG extract_type_string: kind={} text={}", kind, node_text);
+    match kind {
+        "type" => {
+            let mut result = String::new();
+            for i in 0..node.child_count() {
+                if let Some(child) = node.child(i) {
+                    let child_str = extract_type_string(child, text);
+                    result.push_str(&child_str);
+                }
+            }
+            // Check if there's a '?' sibling after this type node
+            if let Some(parent) = node.parent() {
+                for i in 0..parent.child_count() {
+                    if let Some(sibling) = parent.child(i) {
+                        if sibling.kind() == "?" {
+                            // Check if this '?' comes after our type node
+                            if sibling.start_byte() > node.end_byte() {
+                                result.push('?');
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            result
+        }
+        "type_identifier" | "identifier" => {
+            let mut result = node_text.to_string();
+            // Check if there's a '?' sibling after this identifier
+            if let Some(parent) = node.parent() {
+                for i in 0..parent.child_count() {
+                    if let Some(sibling) = parent.child(i) {
+                        if sibling.kind() == "?" {
+                            // Check if this '?' comes after our identifier
+                            if sibling.start_byte() > node.end_byte() {
+                                result.push('?');
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            result
+        }
+        "type_arguments" => {
+            let mut result = String::from("<");
+            let mut first = true;
+            for i in 0..node.child_count() {
+                if let Some(child) = node.child(i) {
+                    if !first {
+                        result.push_str(", ");
+                    }
+                    result.push_str(&extract_type_string(child, text));
+                    first = false;
+                }
+            }
+            result.push('>');
+            result
+        }
+        _ => {
+            // Fallback: concatenate all children
+            let mut result = String::new();
+            for i in 0..node.child_count() {
+                if let Some(child) = node.child(i) {
+                    result.push_str(&extract_type_string(child, text));
+                }
+            }
+            result
+        }
+    }
+}
+
 fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Argument> {
     let mut annotations = Vec::new();
     let mut name = String::new();
@@ -165,6 +240,29 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
                     }
                 }
             }
+        }
+    }
+    
+    // Try to get the type from the type field first
+    if let Some(type_field) = parameter_node.child_by_field_name("type") {
+        let type_str = extract_type_string(type_field, text);
+        if !type_str.is_empty() {
+            param_type = type_str;
+        }
+    } else {
+        // If no type field, try to reconstruct from type_identifier and type_arguments
+        let mut type_str = String::new();
+        for i in 0..parameter_node.child_count() {
+            if let Some(child) = parameter_node.child(i) {
+                if child.kind() == "type_identifier" {
+                    type_str.push_str(child.utf8_text(text).unwrap_or(""));
+                } else if child.kind() == "type_arguments" {
+                    type_str.push_str(child.utf8_text(text).unwrap_or(""));
+                }
+            }
+        }
+        if !type_str.is_empty() {
+            param_type = type_str;
         }
     }
     
@@ -190,9 +288,37 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
                     }
                 }
                 "type_identifier" => {
+                    if param_type.is_empty() {
+                        if let Some(type_text) = child.utf8_text(text).ok() {
+                            // Skip "required" as it's not a type
+                            if type_text != "required" {
+                                param_type = type_text.to_string();
+                                // Check for nullable type (next sibling is '?')
+                                if let Some(next_sibling) = parameter_node.child(i + 1) {
+                                    if next_sibling.kind() == "?" {
+                                        param_type.push('?');
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                "generic_type" => {
+                    // This is a generic type like List<String>, Map<String, int>, etc.
                     if let Some(type_text) = child.utf8_text(text).ok() {
-                        // Skip "required" as it's not a type
-                        if type_text != "required" {
+                        param_type = type_text.to_string();
+                        // Check for nullable type (next sibling is '?')
+                        if let Some(next_sibling) = parameter_node.child(i + 1) {
+                            if next_sibling.kind() == "?" {
+                                param_type.push('?');
+                            }
+                        }
+                    }
+                }
+                "type" => {
+                    // This is a type node that might contain generic information
+                    if param_type.is_empty() {
+                        if let Some(type_text) = child.utf8_text(text).ok() {
                             param_type = type_text.to_string();
                             // Check for nullable type (next sibling is '?')
                             if let Some(next_sibling) = parameter_node.child(i + 1) {
@@ -256,10 +382,45 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
         }
     }
     
+    // If we still don't have a complete type, try to extract the full type from the parameter text
+    if param_type.is_empty() || param_type.len() < 3 {
+        let parameter_text = parameter_node.utf8_text(text).unwrap_or("");
+        // Look for patterns like "List<String>", "Map<String, int>", etc.
+        let words: Vec<&str> = parameter_text.split_whitespace().collect();
+        
+        // First try specific collection types
+        for word in &words {
+            if word.starts_with("List<") || word.starts_with("Map<") || word.starts_with("Set<") {
+                param_type = word.to_string();
+                break;
+            }
+        }
+        
+        // If still empty, try a more comprehensive approach
+        if param_type.is_empty() {
+            // Look for any word with angle brackets (generic types)
+            for word in &words {
+                if word.contains('<') && word.contains('>') {
+                    param_type = word.to_string();
+                    break;
+                }
+            }
+        }
+    }
+    
+    // Check if the parameter text ends with '?' to mark it as nullable
+    let parameter_text = parameter_node.utf8_text(text).unwrap_or("");
+    if parameter_text.contains('?') && !param_type.ends_with('?') {
+        param_type.push('?');
+    }
+    
     if name.is_empty() || param_type.is_empty() {
         return None;
     }
     
+    // Debug: print the S-expression of the parameter node
+    // println!("DEBUG PARAMETER S-EXPR: {}", parameter_node.to_sexp());
+
     Some(Argument {
         annotations,
         name,

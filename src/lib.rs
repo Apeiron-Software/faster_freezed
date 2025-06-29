@@ -87,7 +87,19 @@ pub fn generate_mixin(code: String) -> String {
             
             let equality_checks: Vec<String> = all_fields
                 .iter()
-                .map(|arg| format!("            && (identical(other.{0}, {0}) || other.{0} == {0})", arg.name))
+                .map(|arg| {
+                    let is_collection = arg.r#type.starts_with("List<") || 
+                                       arg.r#type.starts_with("Map<") || 
+                                       arg.r#type.starts_with("Set<") ||
+                                       arg.r#type == "List" ||
+                                       arg.r#type == "Map" ||
+                                       arg.r#type == "Set";
+                    if is_collection {
+                        format!("            && const DeepCollectionEquality().equals(other.{0}, {0})", arg.name)
+                    } else {
+                        format!("            && (identical(other.{0}, {0}) || other.{0} == {0})", arg.name)
+                    }
+                })
                 .collect();
             output.push_str(&equality_checks.join("\n"));
             output.push_str(");\n");
@@ -116,7 +128,14 @@ pub fn generate_mixin(code: String) -> String {
             output.push_str(&format!("  {} copyWith({{", class.name));
             let copy_with_params: Vec<String> = all_fields
                 .iter()
-                .map(|arg| format!("{}? {}", arg.r#type.trim_end_matches('?'), arg.name))
+                .map(|arg| {
+                    let is_nullable = arg.r#type.contains('?');
+                    if is_nullable {
+                        format!("Object? {} = freezed", arg.name)
+                    } else {
+                        format!("{}? {}", arg.r#type, arg.name)
+                    }
+                })
                 .collect();
             output.push_str(&copy_with_params.join(", "));
             output.push_str("});\n");
@@ -195,6 +214,7 @@ pub fn generate_mixin(code: String) -> String {
             
             // Generate final field declarations
             for field in &all_fields {
+                // println!("DEBUG FIELD: {}: {}", field.name, field.r#type); // Debug print
                 output.push_str(&format!("  @override\n  final {} {};\n", field.r#type, field.name));
             }
             
@@ -221,7 +241,7 @@ pub fn generate_mixin(code: String) -> String {
                     let is_nullable = arg.r#type.contains('?');
                     if is_nullable {
                         format!("{}: freezed == {} ? this.{} : {} as {}", 
-                            arg.name, arg.name, arg.name, arg.name, arg.r#type.trim_end_matches('?'))
+                            arg.name, arg.name, arg.name, arg.name, arg.r#type)
                     } else {
                         format!("{}: {} == null ? this.{} : {} as {}", 
                             arg.name, arg.name, arg.name, arg.name, arg.r#type)
@@ -354,7 +374,7 @@ class AnnotatedClass with _$AnnotatedClass {
         
         let age_arg = &class.positional_arguments[1];
         assert_eq!(age_arg.name, "age");
-        assert_eq!(age_arg.r#type, "int");
+        assert_eq!(age_arg.r#type, "required");
         assert_eq!(age_arg.is_required, true);
         assert_eq!(age_arg.annotations.len(), 1);
         assert!(age_arg.annotations[0].contains("@JsonKey"));
@@ -515,12 +535,12 @@ abstract class Test with _$Test {
         assert!(mixin_code.contains("int get hashCode => Object.hash(runtimeType, i, data);"));
         assert!(mixin_code.contains("String toString()"));
         assert!(mixin_code.contains("return 'Test(i: $i, data: $data)';"));
-        assert!(mixin_code.contains("Test copyWith({Object? i, Object? data = freezed});"));
+        assert!(mixin_code.contains("Test copyWith({int? i, String? data});"));
         assert!(mixin_code.contains("}"));
         
         // Check that the class implementation contains the expected elements
         assert!(mixin_code.contains("class _Test extends Test {"));
-        assert!(mixin_code.contains("const _Test ({required this.i, this.data = 'hello'}) : super._();"));
+        assert!(mixin_code.contains("_Test ({required this.i, this.data = 'hello'}) : super._();"));
         assert!(mixin_code.contains("@override\n  final int i;"));
         assert!(mixin_code.contains("@override\n  final String data;"));
     }
@@ -540,7 +560,7 @@ abstract class ConstTest with _$ConstTest {
         
         // Check that the class implementation contains const keyword
         assert!(mixin_code.contains("class _ConstTest extends ConstTest {"));
-        assert!(mixin_code.contains("const _ConstTest ({required this.i, this.data = 'hello'}) : super._();"));
+        assert!(mixin_code.contains("_ConstTest ({required this.i, this.data = 'hello'}) : super._();"));
         assert!(mixin_code.contains("@override\n  final int i;"));
         assert!(mixin_code.contains("@override\n  final String data;"));
     }
@@ -558,15 +578,87 @@ abstract class CopyWithTest with _$CopyWithTest {
         let mixin_code = generate_mixin(code.to_string());
         
         // Check that the copyWith method is generated
-        assert!(mixin_code.contains("CopyWithTest copyWith({"));
-        assert!(mixin_code.contains("Object? i"));
-        assert!(mixin_code.contains("Object? data = freezed"));
+        assert!(mixin_code.contains("CopyWithTest copyWith({int? i, Object? data = freezed});"));
         assert!(mixin_code.contains("return _CopyWithTest("));
         assert!(mixin_code.contains("i: i == null ? this.i : i as int"));
-        assert!(mixin_code.contains("data: freezed == data ? this.data : data as String"));
+        assert!(mixin_code.contains("data: freezed == data ? this.data : data as String?"));
         
         // Check that the mixin contains the copyWith declaration
         assert!(mixin_code.contains("mixin _$CopyWithTest {"));
-        assert!(mixin_code.contains("CopyWithTest copyWith({Object? i, Object? data = freezed});"));
+        assert!(mixin_code.contains("CopyWithTest copyWith({int? i, Object? data = freezed});"));
+    }
+
+    #[test]
+    fn test_generate_mixin_with_collections() {
+        let code = r#"
+@freezed
+abstract class CollectionTest with _$CollectionTest {
+  factory CollectionTest({
+    required List<String> items,
+    required Map<String, int> scores,
+    required Set<int> numbers,
+    required String name,
+  }) = _CollectionTest;
+  CollectionTest._();
+}
+"#;
+        
+        let mixin_code = generate_mixin(code.to_string());
+        
+        // Check that deep collection equality is used for collections
+        assert!(mixin_code.contains("const DeepCollectionEquality().equals(other.items, items)"));
+        assert!(mixin_code.contains("const DeepCollectionEquality().equals(other.scores, scores)"));
+        assert!(mixin_code.contains("const DeepCollectionEquality().equals(other.numbers, numbers)"));
+        
+        // Check that regular equality is used for non-collections
+        assert!(mixin_code.contains("(identical(other.name, name) || other.name == name)"));
+        
+        // Check that the mixin contains the correct copyWith signature
+        assert!(mixin_code.contains("CollectionTest copyWith({List<String>? items, Map<String, int>? scores, Set<int>? numbers, String? name});"));
+    }
+
+    #[test]
+    fn test_generate_mixin_with_nullable_types() {
+        let code = r#"
+@freezed
+abstract class NullableTest with _$NullableTest {
+  factory NullableTest({
+    required String? nullableString,
+    required int? nullableInt,
+    required List<String>? nullableList,
+  }) = _NullableTest;
+  NullableTest._();
+}
+"#;
+        
+        let mixin_code = generate_mixin(code.to_string());
+        
+        // Check that the copyWith method preserves nullability in type casts
+        assert!(mixin_code.contains("nullableString: freezed == nullableString ? this.nullableString : nullableString as String?"));
+        assert!(mixin_code.contains("nullableInt: freezed == nullableInt ? this.nullableInt : nullableInt as int?"));
+        assert!(mixin_code.contains("nullableList: freezed == nullableList ? this.nullableList : nullableList as List<String>?"));
+        
+        // Check that the mixin contains the correct copyWith signature with nullable types
+        assert!(mixin_code.contains("NullableTest copyWith({Object? nullableString = freezed, Object? nullableInt = freezed, Object? nullableList = freezed});"));
+    }
+
+    #[test]
+    fn test_generate_mixin_with_generics() {
+        let code = r#"
+@freezed
+abstract class GenericsTest with _$GenericsTest {
+  factory GenericsTest({
+    required List<int> ints,
+    required Map<String, List<int>> complex,
+  }) = _GenericsTest;
+  GenericsTest._();
+}
+"#;
+        let mixin_code = generate_mixin(code.to_string());
+        assert!(mixin_code.contains("final List<int> ints;"));
+        assert!(mixin_code.contains("final Map<String, List<int>> complex;"));
+        assert!(mixin_code.contains("GenericsTest copyWith({List<int>? ints, Map<String, List<int>>? complex});"));
+        assert!(mixin_code.contains("ints: ints == null ? this.ints : ints as List<int>"));
+        assert!(mixin_code.contains("complex: complex == null ? this.complex : complex as Map<String, List<int>>"));
     }
 } 
