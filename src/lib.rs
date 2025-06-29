@@ -112,6 +112,16 @@ pub fn generate_mixin(code: String) -> String {
             ));
             output.push_str("  }\n");
             
+            // Generate copyWith method declaration in mixin
+            output.push_str("\n  @override\n");
+            output.push_str(&format!("  {} copyWith({{", class.name));
+            let copy_with_params: Vec<String> = all_fields
+                .iter()
+                .map(|arg| format!("{}? {}", arg.r#type.trim_end_matches('?'), arg.name))
+                .collect();
+            output.push_str(&copy_with_params.join(", "));
+            output.push_str("});\n");
+            
             // Close the mixin
             output.push_str("}\n\n");
             
@@ -150,7 +160,7 @@ pub fn generate_mixin(code: String) -> String {
                         }
                     })
                     .collect();
-                output.push_str(&format!("  {} _{} ({}) : super._();\n", 
+                output.push_str(&format!("  {}const _{} ({}) : super._();\n", 
                     const_keyword, class.name, pos_params.join(", ")));
             } else {
                 // Both positional and named parameters
@@ -189,12 +199,10 @@ pub fn generate_mixin(code: String) -> String {
                 output.push_str(&format!("  @override\n  final {} {};\n", field.r#type, field.name));
             }
             
-            // Generate copyWith method
+            // Generate copyWith method in the class
             output.push_str("\n  @override\n");
             output.push_str(&format!("  {} copyWith({{", class.name));
-            
-            // Generate copyWith parameters
-            let copy_with_params: Vec<String> = all_fields
+            let copy_with_params_impl: Vec<String> = all_fields
                 .iter()
                 .map(|arg| {
                     let is_nullable = arg.r#type.contains('?');
@@ -205,12 +213,9 @@ pub fn generate_mixin(code: String) -> String {
                     }
                 })
                 .collect();
-            output.push_str(&copy_with_params.join(", "));
+            output.push_str(&copy_with_params_impl.join(", "));
             output.push_str("}) {\n");
-            
-            // Generate copyWith body
             output.push_str(&format!("    return _{}(", class.name));
-            
             let copy_with_args: Vec<String> = all_fields
                 .iter()
                 .map(|arg| {
@@ -511,6 +516,7 @@ abstract class Test with _$Test {
         assert!(mixin_code.contains("int get hashCode => Object.hash(runtimeType, i, data);"));
         assert!(mixin_code.contains("String toString()"));
         assert!(mixin_code.contains("return 'Test(i: $i, data: $data)';"));
+        assert!(mixin_code.contains("Test copyWith({Object? i, Object? data = freezed});"));
         assert!(mixin_code.contains("}"));
         
         // Check that the class implementation contains the expected elements
@@ -559,5 +565,9 @@ abstract class CopyWithTest with _$CopyWithTest {
         assert!(mixin_code.contains("return _CopyWithTest("));
         assert!(mixin_code.contains("i: i == null ? this.i : i as int"));
         assert!(mixin_code.contains("data: freezed == data ? this.data : data as String"));
+        
+        // Check that the mixin contains the copyWith declaration
+        assert!(mixin_code.contains("mixin _$CopyWithTest {"));
+        assert!(mixin_code.contains("CopyWithTest copyWith({Object? i, Object? data = freezed});"));
     }
 } 
