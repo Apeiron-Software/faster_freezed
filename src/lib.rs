@@ -91,7 +91,7 @@ pub fn generate_mixin(code: String) -> String {
                 .collect();
             output.push_str(&equality_checks.join("\n"));
             output.push_str(");\n");
-            output.push_str("   }\n");
+            output.push_str("  }\n"); // DO NOT TOUCH THIS, THIS IS GOOD
             
             // Generate hashCode
             output.push_str("\n  @override\n");
@@ -150,7 +150,7 @@ pub fn generate_mixin(code: String) -> String {
                         }
                     })
                     .collect();
-                output.push_str(&format!("  {}const _{} ({}) : super._();\n", 
+                output.push_str(&format!("  {} _{} ({}) : super._();\n", 
                     const_keyword, class.name, pos_params.join(", ")));
             } else {
                 // Both positional and named parameters
@@ -188,6 +188,45 @@ pub fn generate_mixin(code: String) -> String {
             for field in &all_fields {
                 output.push_str(&format!("  @override\n  final {} {};\n", field.r#type, field.name));
             }
+            
+            // Generate copyWith method
+            output.push_str("\n  @override\n");
+            output.push_str(&format!("  {} copyWith({{", class.name));
+            
+            // Generate copyWith parameters
+            let copy_with_params: Vec<String> = all_fields
+                .iter()
+                .map(|arg| {
+                    let is_nullable = arg.r#type.contains('?');
+                    if is_nullable {
+                        format!("Object? {} = freezed", arg.name)
+                    } else {
+                        format!("Object? {}", arg.name)
+                    }
+                })
+                .collect();
+            output.push_str(&copy_with_params.join(", "));
+            output.push_str("}) {\n");
+            
+            // Generate copyWith body
+            output.push_str(&format!("    return _{}(", class.name));
+            
+            let copy_with_args: Vec<String> = all_fields
+                .iter()
+                .map(|arg| {
+                    let is_nullable = arg.r#type.contains('?');
+                    if is_nullable {
+                        format!("{}: freezed == {} ? this.{} : {} as {}", 
+                            arg.name, arg.name, arg.name, arg.name, arg.r#type.trim_end_matches('?'))
+                    } else {
+                        format!("{}: {} == null ? this.{} : {} as {}", 
+                            arg.name, arg.name, arg.name, arg.name, arg.r#type)
+                    }
+                })
+                .collect();
+            output.push_str(&copy_with_args.join(", "));
+            output.push_str(");\n");
+            output.push_str("  }\n");
             
             // Close the class
             output.push_str("}\n\n");
@@ -278,7 +317,7 @@ class NamedClass with _$NamedClass {
         
         let age_arg = &class.named_arguments[2];
         assert_eq!(age_arg.name, "age");
-        assert_eq!(age_arg.r#type, "int");
+        assert_eq!(age_arg.r#type, "int?");
         assert_eq!(age_arg.is_required, false);
     }
 
@@ -499,5 +538,26 @@ abstract class ConstTest with _$ConstTest {
         assert!(mixin_code.contains("const _ConstTest ({required this.i, this.data = 'hello'}) : super._();"));
         assert!(mixin_code.contains("@override\n  final int i;"));
         assert!(mixin_code.contains("@override\n  final String data;"));
+    }
+
+    #[test]
+    fn test_generate_mixin_with_copywith() {
+        let code = r#"
+@freezed
+abstract class CopyWithTest with _$CopyWithTest {
+  factory CopyWithTest({required int i, String? data}) = _CopyWithTest;
+  CopyWithTest._();
+}
+"#;
+        
+        let mixin_code = generate_mixin(code.to_string());
+        
+        // Check that the copyWith method is generated
+        assert!(mixin_code.contains("CopyWithTest copyWith({"));
+        assert!(mixin_code.contains("Object? i"));
+        assert!(mixin_code.contains("Object? data = freezed"));
+        assert!(mixin_code.contains("return _CopyWithTest("));
+        assert!(mixin_code.contains("i: i == null ? this.i : i as int"));
+        assert!(mixin_code.contains("data: freezed == data ? this.data : data as String"));
     }
 } 

@@ -194,6 +194,12 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
                         // Skip "required" as it's not a type
                         if type_text != "required" {
                             param_type = type_text.to_string();
+                            // Check for nullable type (next sibling is '?')
+                            if let Some(next_sibling) = parameter_node.child(i + 1) {
+                                if next_sibling.kind() == "?" {
+                                    param_type.push('?');
+                                }
+                            }
                         }
                     }
                 }
