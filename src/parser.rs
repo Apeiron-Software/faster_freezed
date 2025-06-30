@@ -111,7 +111,6 @@ pub fn parse_dart_code(code: &str) -> Vec<FreezedClass> {
                     let parameter_node = parameter_match.nodes_for_capture_index(0).next().unwrap();
 
                     if let Some(argument) = parse_parameter(parameter_node, code.as_bytes()) {
-                        println!("{:?}", argument);
                         let parameter_start = parameter_node.start_byte();
                         let factory_text_bytes =
                             factory_node.utf8_text(code.as_bytes()).unwrap_or("");
@@ -151,82 +150,165 @@ pub fn parse_dart_code(code: &str) -> Vec<FreezedClass> {
     freezed_classes
 }
 
-fn extract_type_string(node: tree_sitter::Node, text: &[u8]) -> String {
-    let kind = node.kind();
+#[derive(Debug, Clone)]
+struct Type {
+    name: String,
+    nullable: bool,
+    type_arguments: Vec<Type>,
+}
+
+impl Type {
+    fn to_string(&self) -> String {
+        let mut s = self.name.clone();
+        if !self.type_arguments.is_empty() {
+            s.push('<');
+            s.push_str(
+                &self
+                    .type_arguments
+                    .iter()
+                    .map(|t| t.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+            s.push('>');
+        }
+        if self.nullable {
+            s.push('?');
+        }
+        s
+    }
+}
+
+fn print_ts_tree(node: tree_sitter::Node, text: &[u8], depth: usize) {
+    let indent = "  ".repeat(depth);
     let node_text = node.utf8_text(text).unwrap_or("");
     println!(
-        "DEBUG extract_type_string: kind={} text={}",
-        kind, node_text
+        "{}[TS] kind: {}, text: '{}', range: {:?}",
+        indent,
+        node.kind(),
+        node_text,
+        node.range()
     );
-    match kind {
-        "type" => {
-            let mut result = String::new();
-            for i in 0..node.child_count() {
-                if let Some(child) = node.child(i) {
-                    let child_str = extract_type_string(child, text);
-                    result.push_str(&child_str);
-                }
-            }
-            // Check if there's a '?' sibling after this type node
-            if let Some(parent) = node.parent() {
-                for i in 0..parent.child_count() {
-                    if let Some(sibling) = parent.child(i) {
-                        if sibling.kind() == "?" {
-                            // Check if this '?' comes after our type node
-                            if sibling.start_byte() > node.end_byte() {
-                                result.push('?');
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            result
-        }
-        "type_identifier" | "identifier" => {
-            let mut result = node_text.to_string();
-            // Check if there's a '?' sibling after this identifier
-            if let Some(parent) = node.parent() {
-                for i in 0..parent.child_count() {
-                    if let Some(sibling) = parent.child(i) {
-                        if sibling.kind() == "?" {
-                            // Check if this '?' comes after our identifier
-                            if sibling.start_byte() > node.end_byte() {
-                                result.push('?');
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            result
-        }
-        "type_arguments" => {
-            let mut result = String::from("<");
-            let mut first = true;
-            for i in 0..node.child_count() {
-                if let Some(child) = node.child(i) {
-                    if !first {
-                        result.push_str(", ");
-                    }
-                    result.push_str(&extract_type_string(child, text));
-                    first = false;
-                }
-            }
-            result.push('>');
-            result
-        }
-        _ => {
-            // Fallback: concatenate all children
-            let mut result = String::new();
-            for i in 0..node.child_count() {
-                if let Some(child) = node.child(i) {
-                    result.push_str(&extract_type_string(child, text));
-                }
-            }
-            result
+    for i in 0..node.child_count() {
+        if let Some(child) = node.child(i) {
+            print_ts_tree(child, text, depth + 1);
         }
     }
+}
+
+fn parse_type(node: tree_sitter::Node, text: &[u8]) -> Option<Type> {
+    print_ts_tree(node, text, 0);
+    match node.kind() {
+        "formal_parameter" | "type" | "generic_type" => {
+            let mut name = String::new();
+            let mut type_arguments = Vec::new();
+            let mut nullable = false;
+            let mut found_type_name = false;
+            let mut i = 0;
+            while i < node.child_count() {
+                if let Some(child) = node.child(i) {
+                    match child.kind() {
+                        "type_identifier" | "identifier" => {
+                            if !found_type_name {
+                                name = child.utf8_text(text).unwrap_or("").to_string();
+                                found_type_name = true;
+                                // Check if next sibling is type_arguments
+                                if let Some(next_child) = node.child(i + 1) {
+                                    if next_child.kind() == "type_arguments" {
+                                        type_arguments = parse_type_arguments(next_child, text);
+                                        i += 1; // skip type_arguments node
+                                    }
+                                }
+                            }
+                        }
+                        "type_arguments" => {
+                            // If we didn't just process this as a sibling, parse as extra type arguments
+                            let extra_args = parse_type_arguments(child, text);
+                            type_arguments.extend(extra_args);
+                        }
+                        "?" => {
+                            nullable = true;
+                        }
+                        _ => {}
+                    }
+                }
+                i += 1;
+            }
+            if !name.is_empty() {
+                let t = Type {
+                    name,
+                    nullable,
+                    type_arguments,
+                };
+                Some(t)
+            } else {
+                // Try to find a type node among children
+                for i in 0..node.child_count() {
+                    if let Some(child) = node.child(i) {
+                        if ["type", "generic_type", "type_identifier"].contains(&child.kind()) {
+                            return parse_type(child, text);
+                        }
+                    }
+                }
+                None
+            }
+        }
+        "type_arguments" => {
+            // Should not return a Type, handled by helper
+            None
+        }
+        "type_identifier" | "identifier" => {
+            let name = node.utf8_text(text).unwrap_or("").to_string();
+            Some(Type {
+                name,
+                nullable: false,
+                type_arguments: Vec::new(),
+            })
+        }
+        _ => None,
+    }
+}
+
+// Helper to parse type_arguments node into Vec<Type>
+fn parse_type_arguments(node: tree_sitter::Node, text: &[u8]) -> Vec<Type> {
+    let mut args = Vec::new();
+    let mut i = 0;
+    while i < node.child_count() {
+        if let Some(child) = node.child(i) {
+            if child.kind() == "type_identifier" {
+                // Check if next sibling is a type_arguments node
+                if let Some(next_child) = node.child(i + 1) {
+                    if next_child.kind() == "type_arguments" {
+                        // Recursively parse type arguments for this type_identifier
+                        let name = child.utf8_text(text).unwrap_or("").to_string();
+                        let type_arguments = parse_type_arguments(next_child, text);
+                        let t = Type {
+                            name,
+                            nullable: false,
+                            type_arguments,
+                        };
+                        args.push(t);
+                        i += 2;
+                        continue;
+                    }
+                }
+                // Otherwise, just a plain type_identifier
+                let name = child.utf8_text(text).unwrap_or("").to_string();
+                let t = Type {
+                    name,
+                    nullable: false,
+                    type_arguments: Vec::new(),
+                };
+                args.push(t);
+            } else if ["type", "generic_type"].contains(&child.kind()) {
+                if let Some(arg_type) = parse_type(child, text) {
+                    args.push(arg_type);
+                }
+            }
+        }
+        i += 1;
+    }
+    args
 }
 
 fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Argument> {
@@ -253,33 +335,13 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
         }
     }
 
-    // THIS IS WRONG
-    // there's never a child by name "type"
-    // Try to get the type from the type field first
-    if let Some(type_field) = parameter_node.child_by_field_name("type") {
-        let type_str = extract_type_string(type_field, text);
-        if !type_str.is_empty() {
-            param_type = type_str;
-        }
-    } else {
-        // If no type field, try to reconstruct from type_identifier and type_arguments
-        let mut type_str = String::new();
-        for i in 0..parameter_node.child_count() {
-            if let Some(child) = parameter_node.child(i) {
-                if child.kind() == "type_identifier" {
-                    let t = child.utf8_text(text).unwrap_or("");
-                    if t != "required" && !t.starts_with('@') {
-                        type_str.push_str(t);
-                    }
-                } else if child.kind() == "type_arguments" {
-                    type_str.push_str(child.utf8_text(text).unwrap_or(""));
-                }
-            }
-        }
-        if !type_str.is_empty() {
-            param_type = type_str;
-        }
+    // --- NEW TYPE EXTRACTION LOGIC ---
+    dbg!("DEBUGGING PARAMETER NODE");
+    print_ts_tree(parameter_node, text, 0);
+    if let Some(parsed_type) = parse_type(parameter_node, text) {
+        param_type = parsed_type.to_string();
     }
+    // --- END NEW TYPE EXTRACTION LOGIC ---
 
     // Parse annotations and other elements
     for i in 0..parameter_node.child_count() {
@@ -300,48 +362,6 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
                             }
                         }
                         annotations.push(annotation_text.to_string());
-                    }
-                }
-                "type_identifier" => {
-                    if param_type.is_empty() {
-                        if let Ok(type_text) = child.utf8_text(text) {
-                            // Skip "required" and annotations as type
-                            if type_text != "required" && !type_text.starts_with('@') {
-                                param_type = type_text.to_string();
-                                // Check for nullable type (next sibling is '?')
-                                if let Some(next_sibling) = parameter_node.child(i + 1) {
-                                    if next_sibling.kind() == "?" {
-                                        param_type.push('?');
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                "generic_type" => {
-                    // This is a generic type like List<String>, Map<String, int>, etc.
-                    if let Ok(type_text) = child.utf8_text(text) {
-                        param_type = type_text.to_string();
-                        // Check for nullable type (next sibling is '?')
-                        if let Some(next_sibling) = parameter_node.child(i + 1) {
-                            if next_sibling.kind() == "?" {
-                                param_type.push('?');
-                            }
-                        }
-                    }
-                }
-                "type" => {
-                    // This is a type node that might contain generic information
-                    if param_type.is_empty() {
-                        if let Ok(type_text) = child.utf8_text(text) {
-                            param_type = type_text.to_string();
-                            // Check for nullable type (next sibling is '?')
-                            if let Some(next_sibling) = parameter_node.child(i + 1) {
-                                if next_sibling.kind() == "?" {
-                                    param_type.push('?');
-                                }
-                            }
-                        }
                     }
                 }
                 "identifier" => {
@@ -441,4 +461,3 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
         is_required,
     })
 }
-
