@@ -641,3 +641,47 @@ factory JsonConverterTest.fromJson(Map<String, dynamic> json) => _$JsonConverter
       assert!(mixin_code.contains("'nullableField': const CustomJsonConverter().toJson(instance.nullableField)"));
       assert!(mixin_code.contains("'numbers': const ListJsonConverter().toJson(instance.numbers)"));
   }
+
+  #[test]
+  fn test_generate_mixin_with_boolean_types() {
+      let code = r#"
+@freezed
+abstract class BooleanTest with _$BooleanTest {
+factory BooleanTest({
+  required bool isActive,
+  bool? isOptional,
+  required List<bool> flags,
+  Set<bool>? optionalFlags,
+}) = _BooleanTest;
+BooleanTest._();
+factory BooleanTest.fromJson(Map<String, dynamic> json) => _$BooleanTestFromJson(json);
+}
+"#;
+      
+      let mixin_code = generate_mixin(code.to_string());
+      println!("{}", mixin_code);
+      // Check that the mixin contains the expected boolean elements
+      assert!(mixin_code.contains("mixin _$BooleanTest {"));
+      assert!(mixin_code.contains("  bool get isActive;"));
+      assert!(mixin_code.contains("  bool? get isOptional;"));
+      assert!(mixin_code.contains("  List<bool> get flags;"));
+      assert!(mixin_code.contains("  Set<bool>? get optionalFlags;"));
+      assert!(mixin_code.contains("  Map<String, dynamic> toJson();"));
+      
+      // Check that the class implementation contains the expected elements
+      assert!(mixin_code.contains("class _BooleanTest extends BooleanTest {"));
+      assert!(mixin_code.contains("  factory _BooleanTest.fromJson(Map<String, dynamic> json) => _$BooleanTestFromJson(json);"));
+      assert!(mixin_code.contains("  @override\n  Map<String, dynamic> toJson() {\n    return _$BooleanTestToJson(this);\n  }"));
+      
+      // Check that the fromJson function handles boolean types correctly
+      assert!(mixin_code.contains("isActive: json['isActive'] as bool"));
+      assert!(mixin_code.contains("isOptional: json['isOptional'] as bool?"));
+      assert!(mixin_code.contains("flags: (json['flags'] as List<dynamic>).map((e) => e as bool).toList()"));
+      assert!(mixin_code.contains("optionalFlags: (json['optionalFlags'] as List<dynamic>?)?.map((e) => e as bool).toSet()"));
+      
+      // Check that the toJson function handles boolean types correctly
+      assert!(mixin_code.contains("'isActive': instance.isActive"));
+      assert!(mixin_code.contains("'isOptional': instance.isOptional"));
+      assert!(mixin_code.contains("'flags': instance.flags"));
+      assert!(mixin_code.contains("'optionalFlags': instance.optionalFlags"));
+  }
