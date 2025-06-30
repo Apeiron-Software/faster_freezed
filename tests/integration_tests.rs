@@ -126,7 +126,7 @@ class ConstTest with _$ConstTest {
     
     let class = &classes[0];
     assert_eq!(class.name, "ConstTest");
-    assert_eq!(class.has_const_constructor, true);
+    assert!(class.has_const_constructor);
     
     let mixin_code = generate_mixin(code.to_string());
     // println!("Generated code:\n{}", mixin_code);
@@ -152,7 +152,7 @@ class JsonTest with _$JsonTest {
     
     let class = &classes[0];
     assert_eq!(class.name, "JsonTest");
-    assert_eq!(class.has_json, true);
+    assert!(class.has_json);
     
     let mixin_code = generate_mixin(code.to_string());
     assert!(mixin_code.contains("mixin _$JsonTest"));
@@ -224,20 +224,20 @@ const factory SimpleClass(
       assert_eq!(class.name, "SimpleClass");
       assert_eq!(class.positional_arguments.len(), 2);
       assert_eq!(class.named_arguments.len(), 0);
-      assert_eq!(class.has_json, false);
-      assert_eq!(class.has_const_constructor, true);
+      assert!(!class.has_json);
+      assert!(class.has_const_constructor);
       
       let name_arg = &class.positional_arguments[0];
       assert_eq!(name_arg.name, "name");
       assert_eq!(name_arg.r#type, "String");
-      assert_eq!(name_arg.is_required, false);
+      assert!(!name_arg.is_required);
       assert_eq!(name_arg.default_value, None);
       assert_eq!(name_arg.annotations.len(), 0);
       
       let age_arg = &class.positional_arguments[1];
       assert_eq!(age_arg.name, "age");
       assert_eq!(age_arg.r#type, "int");
-      assert_eq!(age_arg.is_required, false);
+      assert!(!age_arg.is_required);
       assert_eq!(age_arg.default_value, None);
       assert_eq!(age_arg.annotations.len(), 0);
   }
@@ -262,23 +262,23 @@ const factory NamedClass({
       assert_eq!(class.name, "NamedClass");
       assert_eq!(class.positional_arguments.len(), 0);
       assert_eq!(class.named_arguments.len(), 3);
-      assert_eq!(class.has_json, false);
-      assert_eq!(class.has_const_constructor, true);
+      assert!(!class.has_json);
+      assert!(class.has_const_constructor);
       
       let first_arg = &class.named_arguments[0];
       assert_eq!(first_arg.name, "firstName");
       assert_eq!(first_arg.r#type, "String");
-      assert_eq!(first_arg.is_required, true);
+      assert!(first_arg.is_required);
       
       let last_arg = &class.named_arguments[1];
       assert_eq!(last_arg.name, "lastName");
       assert_eq!(last_arg.r#type, "String");
-      assert_eq!(last_arg.is_required, true);
+      assert!(last_arg.is_required);
       
       let age_arg = &class.named_arguments[2];
       assert_eq!(age_arg.name, "age");
       assert_eq!(age_arg.r#type, "int?");
-      assert_eq!(age_arg.is_required, false);
+      assert!(!age_arg.is_required);
   }
 
   #[test]
@@ -299,7 +299,7 @@ const factory AnnotatedClass(
       let class = &classes[0];
       assert_eq!(class.name, "AnnotatedClass");
       assert_eq!(class.positional_arguments.len(), 2);
-      assert_eq!(class.has_const_constructor, true);
+      assert!(class.has_const_constructor);
       
       let name_arg = &class.positional_arguments[0];
       assert_eq!(name_arg.name, "name");
@@ -311,7 +311,7 @@ const factory AnnotatedClass(
       let age_arg = &class.positional_arguments[1];
       assert_eq!(age_arg.name, "age");
       assert_eq!(age_arg.r#type, "int");
-      assert_eq!(age_arg.is_required, true);
+      assert!(age_arg.is_required);
       assert_eq!(age_arg.annotations.len(), 1);
       assert!(age_arg.annotations[0].contains("@JsonKey"));
   }
@@ -335,9 +335,9 @@ factory JsonClass.fromJson(Map<String, Object?> json) => _$JsonClassFromJson(jso
       
       let class = &classes[0];
       assert_eq!(class.name, "JsonClass");
-      assert_eq!(class.has_json, true);
+      assert!(class.has_json);
       assert_eq!(class.named_arguments.len(), 2);
-      assert_eq!(class.has_const_constructor, true);
+      assert!(class.has_const_constructor);
   }
 
   #[test]
@@ -372,17 +372,17 @@ factory Alien.fromJson(Map<String, Object?> json) => _$AlienFromJson(json);
       
       let person = &classes[0];
       assert_eq!(person.name, "Person");
-      assert_eq!(person.has_json, true);
+      assert!(person.has_json);
       assert_eq!(person.positional_arguments.len(), 1);
       assert_eq!(person.named_arguments.len(), 3);
-      assert_eq!(person.has_const_constructor, true);
+      assert!(person.has_const_constructor);
       
       let alien = &classes[1];
       assert_eq!(alien.name, "Alien");
-      assert_eq!(alien.has_json, true);
+      assert!(alien.has_json);
       assert_eq!(alien.positional_arguments.len(), 0);
       assert_eq!(alien.named_arguments.len(), 3);
-      assert_eq!(alien.has_const_constructor, true);
+      assert!(alien.has_const_constructor);
   }
 
   #[test]
@@ -403,7 +403,7 @@ const factory TestClass(
       let class = &classes[0];
       assert_eq!(class.name, "TestClass");
       assert_eq!(class.positional_arguments.len(), 1);
-      assert_eq!(class.has_const_constructor, true);
+      assert!(class.has_const_constructor);
       
       let name_arg = &class.positional_arguments[0];
       assert_eq!(name_arg.name, "name");
@@ -432,19 +432,19 @@ const ConstClass._();
       
       let class = &classes[0];
       assert_eq!(class.name, "ConstClass");
-      assert_eq!(class.has_json, false);
+      assert!(!class.has_json);
       assert_eq!(class.named_arguments.len(), 2);
-      assert_eq!(class.has_const_constructor, true);
+      assert!(class.has_const_constructor);
       
       let name_arg = &class.named_arguments[0];
       assert_eq!(name_arg.name, "name");
       assert_eq!(name_arg.r#type, "String");
-      assert_eq!(name_arg.is_required, true);
+      assert!(name_arg.is_required);
       
       let age_arg = &class.named_arguments[1];
       assert_eq!(age_arg.name, "age");
       assert_eq!(age_arg.r#type, "int");
-      assert_eq!(age_arg.is_required, false);
+      assert!(!age_arg.is_required);
   }
 
   #[test]

@@ -1,7 +1,7 @@
+use crate::freezed_class::{Argument, FreezedClass};
 use lazy_static::lazy_static;
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Parser, QueryCursor};
-use crate::freezed_class::{Argument, FreezedClass};
 
 const FREEZED_CLASS: &str =
     "((marker_annotation) @freezed_marker . (class_definition) @class_definition)";
@@ -49,25 +49,25 @@ pub fn parse_dart_code(code: &str) -> Vec<FreezedClass> {
             .unwrap()
             .utf8_text(code.as_bytes())
             .unwrap();
-        
+
         let mut positional_arguments = Vec::new();
         let mut named_arguments = Vec::new();
         let mut has_json = false;
         let mut has_const_constructor = false;
-        
+
         let mut class_query = QueryCursor::new();
         let mut executed_query = class_query.matches(&members_q, class_body, code.as_bytes());
 
         while let Some(declaration) = executed_query.next() {
             let declaration_node = declaration.nodes_for_capture_index(0).next().unwrap();
             let declaration_text = declaration_node.utf8_text(code.as_bytes()).unwrap();
-            
+
             // Check if this is a fromJson constructor
             if declaration_text.contains("fromJson") {
                 has_json = true;
                 continue;
             }
-            
+
             // Check for unnamed constructor (._())
             let mut unnamed_constructor_cursor = QueryCursor::new();
             let mut unnamed_constructor_matches = unnamed_constructor_cursor.matches(
@@ -75,7 +75,7 @@ pub fn parse_dart_code(code: &str) -> Vec<FreezedClass> {
                 declaration_node,
                 code.as_bytes(),
             );
-            
+
             if let Some(_unnamed_constructor) = unnamed_constructor_matches.next() {
                 // Check if the constructor has the const keyword
                 if declaration_text.contains("const") {
@@ -83,20 +83,20 @@ pub fn parse_dart_code(code: &str) -> Vec<FreezedClass> {
                 }
                 continue;
             }
-            
+
             // Alternative approach: look for the pattern "const ClassName._()"
             if declaration_text.contains("const") && declaration_text.contains("._()") {
                 has_const_constructor = true;
                 continue;
             }
-            
+
             let mut redirecting_factory = QueryCursor::new();
             let mut query = redirecting_factory.matches(
                 &redirecting_factory_q,
                 declaration_node,
                 code.as_bytes(),
             );
-            
+
             if let Some(factory) = query.next() {
                 // If the factory declaration is const, set has_const_constructor = true
                 if declaration_text.contains("const factory") {
@@ -104,25 +104,28 @@ pub fn parse_dart_code(code: &str) -> Vec<FreezedClass> {
                 }
                 let factory_node = factory.nodes_for_capture_index(0).next().unwrap();
                 let mut parameter_cursor = QueryCursor::new();
-                let mut parameter_matches = parameter_cursor.matches(&formal_parameter_q, factory_node, code.as_bytes());
-                
+                let mut parameter_matches =
+                    parameter_cursor.matches(&formal_parameter_q, factory_node, code.as_bytes());
+
                 while let Some(parameter_match) = parameter_matches.next() {
                     let parameter_node = parameter_match.nodes_for_capture_index(0).next().unwrap();
-                    
+
                     if let Some(argument) = parse_parameter(parameter_node, code.as_bytes()) {
+                        println!("{:?}", argument);
                         let parameter_start = parameter_node.start_byte();
-                        let factory_text_bytes = factory_node.utf8_text(code.as_bytes()).unwrap_or("");
-                        
+                        let factory_text_bytes =
+                            factory_node.utf8_text(code.as_bytes()).unwrap_or("");
+
                         let brace_start = factory_text_bytes.find('{');
                         let brace_end = factory_text_bytes.rfind('}');
-                        
+
                         let is_named = if let (Some(start), Some(end)) = (brace_start, brace_end) {
                             let relative_start = parameter_start - factory_node.start_byte();
                             relative_start > start && relative_start < end
                         } else {
                             false
                         };
-                        
+
                         if is_named {
                             named_arguments.push(argument);
                         } else {
@@ -132,7 +135,7 @@ pub fn parse_dart_code(code: &str) -> Vec<FreezedClass> {
                 }
             }
         }
-        
+
         let freezed_class = FreezedClass {
             name: class_name.to_string(),
             positional_arguments,
@@ -141,7 +144,7 @@ pub fn parse_dart_code(code: &str) -> Vec<FreezedClass> {
             has_json,
             has_const_constructor,
         };
-        
+
         freezed_classes.push(freezed_class);
     }
 
@@ -151,7 +154,10 @@ pub fn parse_dart_code(code: &str) -> Vec<FreezedClass> {
 fn extract_type_string(node: tree_sitter::Node, text: &[u8]) -> String {
     let kind = node.kind();
     let node_text = node.utf8_text(text).unwrap_or("");
-    println!("DEBUG extract_type_string: kind={} text={}", kind, node_text);
+    println!(
+        "DEBUG extract_type_string: kind={} text={}",
+        kind, node_text
+    );
     match kind {
         "type" => {
             let mut result = String::new();
@@ -229,7 +235,7 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
     let mut param_type = String::new();
     let mut default_value = None;
     let mut is_required = false;
-    
+
     // Check if this parameter is marked as required by looking at siblings
     if let Some(parent) = parameter_node.parent() {
         for i in 0..parent.child_count() {
@@ -246,7 +252,9 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
             }
         }
     }
-    
+
+    // THIS IS WRONG
+    // there's never a child by name "type"
     // Try to get the type from the type field first
     if let Some(type_field) = parameter_node.child_by_field_name("type") {
         let type_str = extract_type_string(type_field, text);
@@ -272,13 +280,13 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
             param_type = type_str;
         }
     }
-    
+
     // Parse annotations and other elements
     for i in 0..parameter_node.child_count() {
         if let Some(child) = parameter_node.child(i) {
             match child.kind() {
                 "annotation" => {
-                    if let Some(annotation_text) = child.utf8_text(text).ok() {
+                    if let Ok(annotation_text) = child.utf8_text(text) {
                         // Parse the annotation content
                         if annotation_text.starts_with("@Default(") {
                             // Extract the default value from @Default("value")
@@ -296,7 +304,7 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
                 }
                 "type_identifier" => {
                     if param_type.is_empty() {
-                        if let Some(type_text) = child.utf8_text(text).ok() {
+                        if let Ok(type_text) = child.utf8_text(text) {
                             // Skip "required" and annotations as type
                             if type_text != "required" && !type_text.starts_with('@') {
                                 param_type = type_text.to_string();
@@ -312,7 +320,7 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
                 }
                 "generic_type" => {
                     // This is a generic type like List<String>, Map<String, int>, etc.
-                    if let Some(type_text) = child.utf8_text(text).ok() {
+                    if let Ok(type_text) = child.utf8_text(text) {
                         param_type = type_text.to_string();
                         // Check for nullable type (next sibling is '?')
                         if let Some(next_sibling) = parameter_node.child(i + 1) {
@@ -325,7 +333,7 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
                 "type" => {
                     // This is a type node that might contain generic information
                     if param_type.is_empty() {
-                        if let Some(type_text) = child.utf8_text(text).ok() {
+                        if let Ok(type_text) = child.utf8_text(text) {
                             param_type = type_text.to_string();
                             // Check for nullable type (next sibling is '?')
                             if let Some(next_sibling) = parameter_node.child(i + 1) {
@@ -337,7 +345,7 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
                     }
                 }
                 "identifier" => {
-                    if let Some(name_text) = child.utf8_text(text).ok() {
+                    if let Ok(name_text) = child.utf8_text(text) {
                         // Skip "required" and annotations as parameter name
                         if name_text != "required" && !name_text.starts_with('@') {
                             name = name_text.to_string();
@@ -347,7 +355,7 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
                 "=" => {
                     // Default value follows
                     if let Some(next_sibling) = parameter_node.child(i + 1) {
-                        if let Some(default_text) = next_sibling.utf8_text(text).ok() {
+                        if let Ok(default_text) = next_sibling.utf8_text(text) {
                             default_value = Some(default_text.to_string());
                         }
                     }
@@ -356,24 +364,24 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
             }
         }
     }
-    
+
     // If we found a "required" keyword in the parameter text itself, mark it as required
     let parameter_text = parameter_node.utf8_text(text).unwrap_or("");
     if parameter_text.contains("required") {
         is_required = true;
     }
-    
+
     // If we still don't have a name or type, try to extract them from the parameter text
     if name.is_empty() || param_type.is_empty() {
         let parts: Vec<&str> = parameter_text.split_whitespace().collect();
         let mut skip_next = false;
-        
-        for (_i, part) in parts.iter().enumerate() {
+
+        for part in parts.iter() {
             if skip_next {
                 skip_next = false;
                 continue;
             }
-            
+
             if *part == "required" {
                 is_required = true;
             } else if part.starts_with('@') {
@@ -383,26 +391,32 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
                 }
             } else if param_type.is_empty() && *part != "required" && !part.starts_with('@') {
                 param_type = part.to_string();
-            } else if name.is_empty() && *part != "required" && *part != &param_type && !part.starts_with('@') {
+            } else if name.is_empty()
+                && *part != "required"
+                && *part != param_type
+                && !part.starts_with('@')
+            {
                 name = part.to_string();
             }
         }
     }
-    
+
     // If we still don't have a complete type, try to extract the full type from the parameter text
     if param_type.is_empty() || param_type.len() < 3 {
         let parameter_text = parameter_node.utf8_text(text).unwrap_or("");
         // Look for patterns like "List<String>", "Map<String, int>", etc.
         let words: Vec<&str> = parameter_text.split_whitespace().collect();
-        
+
         // First try specific collection types
         for word in &words {
-            if (word.starts_with("List<") || word.starts_with("Map<") || word.starts_with("Set<")) && !word.starts_with("@") {
+            if (word.starts_with("List<") || word.starts_with("Map<") || word.starts_with("Set<"))
+                && !word.starts_with("@")
+            {
                 param_type = word.to_string();
                 break;
             }
         }
-        
+
         // If still empty, try a more comprehensive approach
         if param_type.is_empty() {
             // Look for any word with angle brackets (generic types)
@@ -414,17 +428,11 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
             }
         }
     }
-    
-    // Check if the parameter text ends with '?' to mark it as nullable
-    let parameter_text = parameter_node.utf8_text(text).unwrap_or("");
-    if parameter_text.contains('?') && !param_type.ends_with('?') {
-        param_type.push('?');
-    }
-    
+
     if name.is_empty() || param_type.is_empty() {
         return None;
     }
-    
+
     Some(Argument {
         annotations,
         name,
@@ -432,4 +440,5 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
         default_value,
         is_required,
     })
-} 
+}
+

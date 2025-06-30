@@ -347,7 +347,7 @@ fn generate_single_mixin(class: &FreezedClass) -> String {
     
     // Generate constructor
     output.push_str(&generate_constructor(class));
-    output.push_str("\n");
+    output.push('\n');
     
     // Generate final field declarations
     output.push_str(&generate_field_declarations(&all_fields[..]));
@@ -371,9 +371,9 @@ fn generate_single_mixin(class: &FreezedClass) -> String {
     // Generate JSON serialization functions outside the class (only if has_json is true)
     if class.has_json {
         output.push_str(&generate_from_json_function(&class.name, &all_fields[..]));
-        output.push_str("\n");
+        output.push('\n');
         output.push_str(&generate_to_json_function(&class.name, &all_fields[..]));
-        output.push_str("\n");
+        output.push('\n');
     }
     
     output
