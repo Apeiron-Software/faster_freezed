@@ -1,7 +1,12 @@
 pub mod freezed_class;
 pub mod parser;
+pub mod json_serialization;
 
 use freezed_class::{FreezedClass, Argument};
+use json_serialization::{
+    generate_field_from_json,
+    generate_field_to_json,
+};
 
 /// Parse Dart code and extract all classes with @freezed annotation
 /// 
@@ -266,123 +271,7 @@ fn generate_from_json_function(class_name: &str, all_fields: &[&Argument]) -> St
         .map(|arg| {
             let field_name = &arg.name;
             let field_type = &arg.r#type;
-            let is_nullable = field_type.contains('?');
-            
-            // Check if field has a JsonConverter decorator
-            let json_converter = arg.annotations.iter().find(|annotation| {
-                annotation.contains("JsonConverter")
-            });
-            
-            if let Some(converter) = json_converter {
-                // Extract converter name (e.g., "DurationJsonConverter" from "@DurationJsonConverter()")
-                let converter_name = converter
-                    .trim_start_matches('@')
-                    .trim_end_matches("()")
-                    .trim_end_matches('(');
-                
-                if is_nullable {
-                    format!("{}: json['{}'] == null ? null : const {}().fromJson((json['{}'] as num).toInt())", 
-                        field_name, field_name, converter_name, field_name)
-                } else {
-                    format!("{}: const {}().fromJson((json['{}'] as num).toInt())", 
-                        field_name, converter_name, field_name)
-                }
-            } else {
-                // Original logic for non-converter fields
-                if field_type == "int" {
-                    format!("{}: (json['{}'] as num).toInt()", field_name, field_name)
-                } else if field_type == "int?" {
-                    format!("{}: (json['{}'] as num?)?.toInt()", field_name, field_name)
-                } else if field_type == "double" {
-                    format!("{}: (json['{}'] as num).toDouble()", field_name, field_name)
-                } else if field_type == "double?" {
-                    format!("{}: (json['{}'] as num?)?.toDouble()", field_name, field_name)
-                } else if field_type == "String" {
-                    format!("{}: json['{}'] as String", field_name, field_name)
-                } else if field_type == "String?" {
-                    format!("{}: json['{}'] as String?", field_name, field_name)
-                } else if field_type.starts_with("List<") {
-                    // Handle List<T> where T could be primitive or object
-                    let is_list_nullable = field_type.ends_with('?');
-                    let list_content = if is_list_nullable { 
-                        &field_type[5..field_type.len()-2] // Remove "List<" and ">?"
-                    } else { 
-                        &field_type[5..field_type.len()-1] // Remove "List<" and ">"
-                    };
-                    
-                    if !is_list_nullable {
-                        // Non-nullable List
-                        if list_content == "int" {
-                            format!("{}: (json['{}'] as List<dynamic>).map((e) => (e as num).toInt()).toList()", field_name, field_name)
-                        } else if list_content == "double" {
-                            format!("{}: (json['{}'] as List<dynamic>).map((e) => (e as num).toDouble()).toList()", field_name, field_name)
-                        } else if list_content == "String" {
-                            format!("{}: (json['{}'] as List<dynamic>).map((e) => e as String).toList()", field_name, field_name)
-                        } else {
-                            // Assume it's an object with fromJson
-                            format!("{}: (json['{}'] as List<dynamic>).map((e) => {}.fromJson(e as Map<String, dynamic>)).toList()", field_name, field_name, list_content)
-                        }
-                    } else {
-                        // Nullable List
-                        if list_content == "int" {
-                            format!("{}: (json['{}'] as List<dynamic>?)?.map((e) => (e as num).toInt()).toList()", field_name, field_name)
-                        } else if list_content == "double" {
-                            format!("{}: (json['{}'] as List<dynamic>?)?.map((e) => (e as num).toDouble()).toList()", field_name, field_name)
-                        } else if list_content == "String" {
-                            format!("{}: (json['{}'] as List<dynamic>?)?.map((e) => e as String).toList()", field_name, field_name)
-                        } else {
-                            // Assume it's an object with fromJson
-                            format!("{}: (json['{}'] as List<dynamic>?)?.map((e) => {}.fromJson(e as Map<String, dynamic>)).toList()", field_name, field_name, list_content)
-                        }
-                    }
-                } else if field_type.starts_with("Map<") {
-                    // Handle Map<K, V> - for now, treat as generic object
-                    if is_nullable {
-                        format!("{}: json['{}'] as Map<String, dynamic>?", field_name, field_name)
-                    } else {
-                        format!("{}: json['{}'] as Map<String, dynamic>", field_name, field_name)
-                    }
-                } else if field_type.starts_with("Set<") {
-                    // Handle Set<T> - convert to list first
-                    let inner_type = &field_type[4..field_type.len()-1]; // Remove "Set<" and ">"
-                    let is_set_nullable = inner_type.ends_with('?');
-                    let base_inner_type = if is_set_nullable { &inner_type[..inner_type.len()-1] } else { inner_type };
-                    
-                    if !is_nullable {
-                        // Non-nullable Set
-                        if base_inner_type == "int" {
-                            format!("{}: (json['{}'] as List<dynamic>).map((e) => (e as num).toInt()).toSet()", field_name, field_name)
-                        } else if base_inner_type == "double" {
-                            format!("{}: (json['{}'] as List<dynamic>).map((e) => (e as num).toDouble()).toSet()", field_name, field_name)
-                        } else if base_inner_type == "String" {
-                            format!("{}: (json['{}'] as List<dynamic>).map((e) => e as String).toSet()", field_name, field_name)
-                        } else {
-                            format!("{}: (json['{}'] as List<dynamic>).map((e) => {}.fromJson(e as Map<String, dynamic>)).toSet()", field_name, field_name, base_inner_type)
-                        }
-                    } else {
-                        // Nullable Set
-                        if base_inner_type == "int" {
-                            format!("{}: (json['{}'] as List<dynamic>?)?.map((e) => (e as num).toInt()).toSet()", field_name, field_name)
-                        } else if base_inner_type == "double" {
-                            format!("{}: (json['{}'] as List<dynamic>?)?.map((e) => (e as num).toDouble()).toSet()", field_name, field_name)
-                        } else if base_inner_type == "String" {
-                            format!("{}: (json['{}'] as List<dynamic>?)?.map((e) => e as String).toSet()", field_name, field_name)
-                        } else {
-                            format!("{}: (json['{}'] as List<dynamic>?)?.map((e) => {}.fromJson(e as Map<String, dynamic>)).toSet()", field_name, field_name, base_inner_type)
-                        }
-                    }
-                } else {
-                    // Handle objects with fromJson method
-                    if is_nullable {
-                        // Nullable object - use null check
-                        let base_type = &field_type[..field_type.len()-1]; // Remove the '?'
-                        format!("{}: json['{}'] == null ? null : {}.fromJson(json['{}'] as Map<String, dynamic>)", field_name, field_name, base_type, field_name)
-                    } else {
-                        // Non-nullable object
-                        format!("{}: {}.fromJson(json['{}'] as Map<String, dynamic>)", field_name, field_type, field_name)
-                    }
-                }
-            }
+            generate_field_from_json(field_name, field_type, arg)
         })
         .collect();
     
@@ -401,24 +290,7 @@ fn generate_to_json_function(class_name: &str, all_fields: &[&Argument]) -> Stri
         .iter()
         .map(|arg| {
             let field_name = &arg.name;
-            
-            // Check if field has a JsonConverter decorator
-            let json_converter = arg.annotations.iter().find(|annotation| {
-                annotation.contains("JsonConverter")
-            });
-            
-            if let Some(converter) = json_converter {
-                // Extract converter name (e.g., "DurationJsonConverter" from "@DurationJsonConverter()")
-                let converter_name = converter
-                    .trim_start_matches('@')
-                    .trim_end_matches("()")
-                    .trim_end_matches('(');
-                
-                format!("  '{}': const {}().toJson(instance.{})", field_name, converter_name, field_name)
-            } else {
-                // Original logic for non-converter fields
-                format!("  '{}': instance.{}", field_name, field_name)
-            }
+            generate_field_to_json(field_name, arg)
         })
         .collect();
     
