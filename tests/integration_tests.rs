@@ -225,7 +225,7 @@ const factory SimpleClass(
       assert_eq!(class.positional_arguments.len(), 2);
       assert_eq!(class.named_arguments.len(), 0);
       assert_eq!(class.has_json, false);
-      assert_eq!(class.has_const_constructor, false);
+      assert_eq!(class.has_const_constructor, true);
       
       let name_arg = &class.positional_arguments[0];
       assert_eq!(name_arg.name, "name");
@@ -263,7 +263,7 @@ const factory NamedClass({
       assert_eq!(class.positional_arguments.len(), 0);
       assert_eq!(class.named_arguments.len(), 3);
       assert_eq!(class.has_json, false);
-      assert_eq!(class.has_const_constructor, false);
+      assert_eq!(class.has_const_constructor, true);
       
       let first_arg = &class.named_arguments[0];
       assert_eq!(first_arg.name, "firstName");
@@ -299,7 +299,7 @@ const factory AnnotatedClass(
       let class = &classes[0];
       assert_eq!(class.name, "AnnotatedClass");
       assert_eq!(class.positional_arguments.len(), 2);
-      assert_eq!(class.has_const_constructor, false);
+      assert_eq!(class.has_const_constructor, true);
       
       let name_arg = &class.positional_arguments[0];
       assert_eq!(name_arg.name, "name");
@@ -337,7 +337,7 @@ factory JsonClass.fromJson(Map<String, Object?> json) => _$JsonClassFromJson(jso
       assert_eq!(class.name, "JsonClass");
       assert_eq!(class.has_json, true);
       assert_eq!(class.named_arguments.len(), 2);
-      assert_eq!(class.has_const_constructor, false);
+      assert_eq!(class.has_const_constructor, true);
   }
 
   #[test]
@@ -375,14 +375,14 @@ factory Alien.fromJson(Map<String, Object?> json) => _$AlienFromJson(json);
       assert_eq!(person.has_json, true);
       assert_eq!(person.positional_arguments.len(), 1);
       assert_eq!(person.named_arguments.len(), 3);
-      assert_eq!(person.has_const_constructor, false);
+      assert_eq!(person.has_const_constructor, true);
       
       let alien = &classes[1];
       assert_eq!(alien.name, "Alien");
       assert_eq!(alien.has_json, true);
       assert_eq!(alien.positional_arguments.len(), 0);
       assert_eq!(alien.named_arguments.len(), 3);
-      assert_eq!(alien.has_const_constructor, false);
+      assert_eq!(alien.has_const_constructor, true);
   }
 
   #[test]
@@ -403,7 +403,7 @@ const factory TestClass(
       let class = &classes[0];
       assert_eq!(class.name, "TestClass");
       assert_eq!(class.positional_arguments.len(), 1);
-      assert_eq!(class.has_const_constructor, false);
+      assert_eq!(class.has_const_constructor, true);
       
       let name_arg = &class.positional_arguments[0];
       assert_eq!(name_arg.name, "name");
@@ -694,6 +694,8 @@ abstract class DateTimeTest with _$DateTimeTest {
   factory DateTimeTest({
     required DateTime startDate,
     DateTime? endDate,
+    required List<DateTime> dates,
+    Set<DateTime>? optionalDates,
   }) = _DateTimeTest;
   DateTimeTest._();
   factory DateTimeTest.fromJson(Map<String, dynamic> json) => _$DateTimeTestFromJson(json);
@@ -704,10 +706,19 @@ abstract class DateTimeTest with _$DateTimeTest {
       // Check getters
       assert!(mixin_code.contains("DateTime get startDate;"));
       assert!(mixin_code.contains("DateTime? get endDate;"));
-      // Check fromJson
+      assert!(mixin_code.contains("List<DateTime> get dates;"));
+      assert!(mixin_code.contains("Set<DateTime>? get optionalDates;"));
+      // Check fromJson for single fields
       assert!(mixin_code.contains("startDate: DateTime.parse(json['startDate'] as String)"));
       assert!(mixin_code.contains("endDate: json['endDate'] == null ? null : DateTime.parse(json['endDate'] as String)"));
-      // Check toJson
+      // Check fromJson for collections
+      assert!(mixin_code.contains("dates: (json['dates'] as List<dynamic>).map((e) => DateTime.parse(e as String)).toList()"));
+      assert!(mixin_code.contains("optionalDates: (json['optionalDates'] as List<dynamic>?)?.map((e) => DateTime.parse(e as String)).toSet()"));
+      // Check toJson for single fields
       assert!(mixin_code.contains("'startDate': instance.startDate.toIso8601String()"));
       assert!(mixin_code.contains("'endDate': instance.endDate?.toIso8601String()"));
+      // Check toJson for collections
+      assert!(mixin_code.contains("'dates': instance.dates"));
+      assert!(mixin_code.contains("'optionalDates': instance.optionalDates"));
   }
+ 

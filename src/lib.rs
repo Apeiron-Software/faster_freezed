@@ -142,6 +142,7 @@ fn generate_constructor(class: &FreezedClass) -> String {
                 if arg.is_required {
                     format!("required this.{}", arg.name)
                 } else if let Some(default) = &arg.default_value {
+                    let default = if default.trim() == "[]" { "const []" } else { default };
                     format!("this.{} = {}", arg.name, default)
                 } else {
                     format!("this.{}", arg.name)
@@ -158,13 +159,14 @@ fn generate_constructor(class: &FreezedClass) -> String {
                 if arg.is_required {
                     format!("required this.{}", arg.name)
                 } else if let Some(default) = &arg.default_value {
+                    let default = if default.trim() == "[]" { "const []" } else { default };
                     format!("this.{} = {}", arg.name, default)
                 } else {
                     format!("this.{}", arg.name)
                 }
             })
             .collect();
-        output.push_str(&format!("  {}const _{} ({}) : super._();\n", 
+        output.push_str(&format!("  {}_{} ({}) : super._();\n", 
             const_keyword, class.name, pos_params.join(", ")));
     } else {
         // Both positional and named parameters
@@ -174,6 +176,7 @@ fn generate_constructor(class: &FreezedClass) -> String {
                 if arg.is_required {
                     format!("required this.{}", arg.name)
                 } else if let Some(default) = &arg.default_value {
+                    let default = if default.trim() == "[]" { "const []" } else { default };
                     format!("this.{} = {}", arg.name, default)
                 } else {
                     format!("this.{}", arg.name)
@@ -186,6 +189,7 @@ fn generate_constructor(class: &FreezedClass) -> String {
                 if arg.is_required {
                     format!("required this.{}", arg.name)
                 } else if let Some(default) = &arg.default_value {
+                    let default = if default.trim() == "[]" { "const []" } else { default };
                     format!("this.{} = {}", arg.name, default)
                 } else {
                     format!("this.{}", arg.name)

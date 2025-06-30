@@ -98,6 +98,10 @@ pub fn parse_dart_code(code: &str) -> Vec<FreezedClass> {
             );
             
             if let Some(factory) = query.next() {
+                // If the factory declaration is const, set has_const_constructor = true
+                if declaration_text.contains("const factory") {
+                    has_const_constructor = true;
+                }
                 let factory_node = factory.nodes_for_capture_index(0).next().unwrap();
                 let mut parameter_cursor = QueryCursor::new();
                 let mut parameter_matches = parameter_cursor.matches(&formal_parameter_q, factory_node, code.as_bytes());
