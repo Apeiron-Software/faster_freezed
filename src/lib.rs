@@ -119,6 +119,11 @@ fn generate_copy_with_declaration(class_name: &str, all_fields: &[&Argument]) ->
     output
 }
 
+/// Generate toJson method declaration in the mixin
+fn generate_to_json_declaration() -> String {
+    "  Map<String, dynamic> toJson();\n".to_string()
+}
+
 /// Generate constructor for the class implementation
 fn generate_constructor(class: &FreezedClass) -> String {
     let const_keyword = if class.has_const_constructor { "const " } else { "" };
@@ -235,6 +240,154 @@ fn generate_copy_with_implementation(class_name: &str, all_fields: &[&Argument])
     output
 }
 
+/// Generate fromJson factory method for the class
+fn generate_from_json_factory(class_name: &str) -> String {
+    format!("  factory _{}.fromJson(Map<String, dynamic> json) => _${}FromJson(json);\n", class_name, class_name)
+}
+
+/// Generate toJson method implementation in the class
+fn generate_to_json_implementation(class_name: &str) -> String {
+    let mut output = String::new();
+    output.push_str("\n  @override\n");
+    output.push_str("  Map<String, dynamic> toJson() {\n");
+    output.push_str(&format!("    return _${}ToJson(this);\n", class_name));
+    output.push_str("  }\n");
+    output
+}
+
+/// Generate the fromJson function implementation
+fn generate_from_json_function(class_name: &str, all_fields: &[&Argument]) -> String {
+    let mut output = String::new();
+    output.push_str(&format!("_{} _${}FromJson(Map<String, dynamic> json) => _{}(", 
+        class_name, class_name, class_name));
+    
+    let from_json_args: Vec<String> = all_fields
+        .iter()
+        .map(|arg| {
+            let field_name = &arg.name;
+            let field_type = &arg.r#type;
+            let is_nullable = field_type.contains('?');
+            
+            if field_type == "int" {
+                format!("{}: (json['{}'] as num).toInt()", field_name, field_name)
+            } else if field_type == "int?" {
+                format!("{}: (json['{}'] as num?)?.toInt()", field_name, field_name)
+            } else if field_type == "double" {
+                format!("{}: (json['{}'] as num).toDouble()", field_name, field_name)
+            } else if field_type == "double?" {
+                format!("{}: (json['{}'] as num?)?.toDouble()", field_name, field_name)
+            } else if field_type == "String" {
+                format!("{}: json['{}'] as String", field_name, field_name)
+            } else if field_type == "String?" {
+                format!("{}: json['{}'] as String?", field_name, field_name)
+            } else if field_type.starts_with("List<") {
+                // Handle List<T> where T could be primitive or object
+                let is_list_nullable = field_type.ends_with('?');
+                let list_content = if is_list_nullable { 
+                    &field_type[5..field_type.len()-2] // Remove "List<" and ">?"
+                } else { 
+                    &field_type[5..field_type.len()-1] // Remove "List<" and ">"
+                };
+                
+                if !is_list_nullable {
+                    // Non-nullable List
+                    if list_content == "int" {
+                        format!("{}: (json['{}'] as List<dynamic>).map((e) => (e as num).toInt()).toList()", field_name, field_name)
+                    } else if list_content == "double" {
+                        format!("{}: (json['{}'] as List<dynamic>).map((e) => (e as num).toDouble()).toList()", field_name, field_name)
+                    } else if list_content == "String" {
+                        format!("{}: (json['{}'] as List<dynamic>).map((e) => e as String).toList()", field_name, field_name)
+                    } else {
+                        // Assume it's an object with fromJson
+                        format!("{}: (json['{}'] as List<dynamic>).map((e) => {}.fromJson(e as Map<String, dynamic>)).toList()", field_name, field_name, list_content)
+                    }
+                } else {
+                    // Nullable List
+                    if list_content == "int" {
+                        format!("{}: (json['{}'] as List<dynamic>?)?.map((e) => (e as num).toInt()).toList()", field_name, field_name)
+                    } else if list_content == "double" {
+                        format!("{}: (json['{}'] as List<dynamic>?)?.map((e) => (e as num).toDouble()).toList()", field_name, field_name)
+                    } else if list_content == "String" {
+                        format!("{}: (json['{}'] as List<dynamic>?)?.map((e) => e as String).toList()", field_name, field_name)
+                    } else {
+                        // Assume it's an object with fromJson
+                        format!("{}: (json['{}'] as List<dynamic>?)?.map((e) => {}.fromJson(e as Map<String, dynamic>)).toList()", field_name, field_name, list_content)
+                    }
+                }
+            } else if field_type.starts_with("Map<") {
+                // Handle Map<K, V> - for now, treat as generic object
+                if is_nullable {
+                    format!("{}: json['{}'] as Map<String, dynamic>?", field_name, field_name)
+                } else {
+                    format!("{}: json['{}'] as Map<String, dynamic>", field_name, field_name)
+                }
+            } else if field_type.starts_with("Set<") {
+                // Handle Set<T> - convert to list first
+                let inner_type = &field_type[4..field_type.len()-1]; // Remove "Set<" and ">"
+                let is_set_nullable = inner_type.ends_with('?');
+                let base_inner_type = if is_set_nullable { &inner_type[..inner_type.len()-1] } else { inner_type };
+                
+                if !is_nullable {
+                    // Non-nullable Set
+                    if base_inner_type == "int" {
+                        format!("{}: (json['{}'] as List<dynamic>).map((e) => (e as num).toInt()).toSet()", field_name, field_name)
+                    } else if base_inner_type == "double" {
+                        format!("{}: (json['{}'] as List<dynamic>).map((e) => (e as num).toDouble()).toSet()", field_name, field_name)
+                    } else if base_inner_type == "String" {
+                        format!("{}: (json['{}'] as List<dynamic>).map((e) => e as String).toSet()", field_name, field_name)
+                    } else {
+                        format!("{}: (json['{}'] as List<dynamic>).map((e) => {}.fromJson(e as Map<String, dynamic>)).toSet()", field_name, field_name, base_inner_type)
+                    }
+                } else {
+                    // Nullable Set
+                    if base_inner_type == "int" {
+                        format!("{}: (json['{}'] as List<dynamic>?)?.map((e) => (e as num).toInt()).toSet()", field_name, field_name)
+                    } else if base_inner_type == "double" {
+                        format!("{}: (json['{}'] as List<dynamic>?)?.map((e) => (e as num).toDouble()).toSet()", field_name, field_name)
+                    } else if base_inner_type == "String" {
+                        format!("{}: (json['{}'] as List<dynamic>?)?.map((e) => e as String).toSet()", field_name, field_name)
+                    } else {
+                        format!("{}: (json['{}'] as List<dynamic>?)?.map((e) => {}.fromJson(e as Map<String, dynamic>)).toSet()", field_name, field_name, base_inner_type)
+                    }
+                }
+            } else {
+                // Handle objects with fromJson method
+                if is_nullable {
+                    // Nullable object - use null check
+                    let base_type = &field_type[..field_type.len()-1]; // Remove the '?'
+                    format!("{}: json['{}'] == null ? null : {}.fromJson(json['{}'] as Map<String, dynamic>)", field_name, field_name, base_type, field_name)
+                } else {
+                    // Non-nullable object
+                    format!("{}: {}.fromJson(json['{}'] as Map<String, dynamic>)", field_name, field_type, field_name)
+                }
+            }
+        })
+        .collect();
+    
+    output.push_str(&from_json_args.join(",\n  "));
+    output.push_str(");\n");
+    output
+}
+
+/// Generate the toJson function implementation
+fn generate_to_json_function(class_name: &str, all_fields: &[&Argument]) -> String {
+    let mut output = String::new();
+    output.push_str(&format!("Map<String, dynamic> _${}ToJson(_{} instance) => <String, dynamic>{{", 
+        class_name, class_name));
+    
+    let to_json_fields: Vec<String> = all_fields
+        .iter()
+        .map(|arg| {
+            let field_name = &arg.name;
+            format!("  '{}': instance.{}", field_name, field_name)
+        })
+        .collect();
+    
+    output.push_str(&format!("\n{}", to_json_fields.join(",\n")));
+    output.push_str(",\n};\n");
+    output
+}
+
 /// Generate the complete mixin for a single class
 fn generate_single_mixin(class: &FreezedClass) -> String {
     let mut all_fields = Vec::new();
@@ -266,6 +419,11 @@ fn generate_single_mixin(class: &FreezedClass) -> String {
     // Generate copyWith method declaration in mixin
     output.push_str(&generate_copy_with_declaration(&class.name, &all_fields[..]));
     
+    // Generate toJson method declaration in mixin (only if has_json is true)
+    if class.has_json {
+        output.push_str(&generate_to_json_declaration());
+    }
+    
     // Close the mixin
     output.push_str("}\n\n");
     
@@ -282,8 +440,26 @@ fn generate_single_mixin(class: &FreezedClass) -> String {
     // Generate copyWith method in the class
     output.push_str(&generate_copy_with_implementation(&class.name, &all_fields[..]));
     
+    // Generate fromJson factory method for the class (only if has_json is true)
+    if class.has_json {
+        output.push_str(&generate_from_json_factory(&class.name));
+    }
+    
+    // Generate toJson method in the class (only if has_json is true)
+    if class.has_json {
+        output.push_str(&generate_to_json_implementation(&class.name));
+    }
+    
     // Close the class
     output.push_str("}\n\n");
+    
+    // Generate JSON serialization functions outside the class (only if has_json is true)
+    if class.has_json {
+        output.push_str(&generate_from_json_function(&class.name, &all_fields[..]));
+        output.push_str("\n");
+        output.push_str(&generate_to_json_function(&class.name, &all_fields[..]));
+        output.push_str("\n");
+    }
     
     output
 }
