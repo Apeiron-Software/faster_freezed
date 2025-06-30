@@ -38,6 +38,13 @@ pub fn generate_element_from_json(element_type: &str, expr: &str) -> String {
                 format!("{} as bool", expr)
             }
         },
+        "DateTime" => {
+            if is_nullable {
+                format!("{} == null ? null : DateTime.parse({} as String)", expr, expr)
+            } else {
+                format!("DateTime.parse({} as String)", expr)
+            }
+        },
         _ => {
             if is_nullable {
                 format!("{} == null ? null : {}.fromJson({} as Map<String, dynamic>)", expr, base_type, expr)
@@ -125,12 +132,25 @@ pub fn generate_field_to_json(field_name: &str, arg: &Argument) -> String {
     let json_converter = arg.annotations.iter().find(|annotation| {
         annotation.contains("JsonConverter")
     });
+    let field_type = &arg.r#type;
+    let is_nullable = field_type.ends_with('?');
+    let base_type = if is_nullable {
+        &field_type[..field_type.len()-1]
+    } else {
+        field_type.as_str()
+    };
     if let Some(converter) = json_converter {
         let converter_name = converter
             .trim_start_matches('@')
             .trim_end_matches("()")
             .trim_end_matches('(');
         format!("  '{}': const {}().toJson(instance.{})", field_name, converter_name, field_name)
+    } else if base_type == "DateTime" {
+        if is_nullable {
+            format!("  '{}': instance.{}?.toIso8601String()", field_name, field_name)
+        } else {
+            format!("  '{}': instance.{}.toIso8601String()", field_name, field_name)
+        }
     } else {
         format!("  '{}': instance.{}", field_name, field_name)
     }

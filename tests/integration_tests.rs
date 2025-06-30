@@ -685,3 +685,29 @@ factory BooleanTest.fromJson(Map<String, dynamic> json) => _$BooleanTestFromJson
       assert!(mixin_code.contains("'flags': instance.flags"));
       assert!(mixin_code.contains("'optionalFlags': instance.optionalFlags"));
   }
+
+  #[test]
+  fn test_generate_mixin_with_datetime_types() {
+      let code = r#"
+@freezed
+abstract class DateTimeTest with _$DateTimeTest {
+  factory DateTimeTest({
+    required DateTime startDate,
+    DateTime? endDate,
+  }) = _DateTimeTest;
+  DateTimeTest._();
+  factory DateTimeTest.fromJson(Map<String, dynamic> json) => _$DateTimeTestFromJson(json);
+}
+"#;
+      let mixin_code = generate_mixin(code.to_string());
+      println!("{}", mixin_code);
+      // Check getters
+      assert!(mixin_code.contains("DateTime get startDate;"));
+      assert!(mixin_code.contains("DateTime? get endDate;"));
+      // Check fromJson
+      assert!(mixin_code.contains("startDate: DateTime.parse(json['startDate'] as String)"));
+      assert!(mixin_code.contains("endDate: json['endDate'] == null ? null : DateTime.parse(json['endDate'] as String)"));
+      // Check toJson
+      assert!(mixin_code.contains("'startDate': instance.startDate.toIso8601String()"));
+      assert!(mixin_code.contains("'endDate': instance.endDate?.toIso8601String()"));
+  }
