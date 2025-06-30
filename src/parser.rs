@@ -255,7 +255,10 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
         for i in 0..parameter_node.child_count() {
             if let Some(child) = parameter_node.child(i) {
                 if child.kind() == "type_identifier" {
-                    type_str.push_str(child.utf8_text(text).unwrap_or(""));
+                    let t = child.utf8_text(text).unwrap_or("");
+                    if t != "required" && !t.starts_with('@') {
+                        type_str.push_str(t);
+                    }
                 } else if child.kind() == "type_arguments" {
                     type_str.push_str(child.utf8_text(text).unwrap_or(""));
                 }
@@ -290,8 +293,8 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
                 "type_identifier" => {
                     if param_type.is_empty() {
                         if let Some(type_text) = child.utf8_text(text).ok() {
-                            // Skip "required" as it's not a type
-                            if type_text != "required" {
+                            // Skip "required" and annotations as type
+                            if type_text != "required" && !type_text.starts_with('@') {
                                 param_type = type_text.to_string();
                                 // Check for nullable type (next sibling is '?')
                                 if let Some(next_sibling) = parameter_node.child(i + 1) {
@@ -331,8 +334,8 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
                 }
                 "identifier" => {
                     if let Some(name_text) = child.utf8_text(text).ok() {
-                        // Skip "required" as it's not a parameter name
-                        if name_text != "required" {
+                        // Skip "required" and annotations as parameter name
+                        if name_text != "required" && !name_text.starts_with('@') {
                             name = name_text.to_string();
                         }
                     }
@@ -374,9 +377,9 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
                 if part.contains('(') && !part.ends_with(')') {
                     skip_next = true;
                 }
-            } else if param_type.is_empty() && *part != "required" {
+            } else if param_type.is_empty() && *part != "required" && !part.starts_with('@') {
                 param_type = part.to_string();
-            } else if name.is_empty() && *part != "required" && *part != &param_type {
+            } else if name.is_empty() && *part != "required" && *part != &param_type && !part.starts_with('@') {
                 name = part.to_string();
             }
         }
@@ -390,7 +393,7 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
         
         // First try specific collection types
         for word in &words {
-            if word.starts_with("List<") || word.starts_with("Map<") || word.starts_with("Set<") {
+            if (word.starts_with("List<") || word.starts_with("Map<") || word.starts_with("Set<")) && !word.starts_with("@") {
                 param_type = word.to_string();
                 break;
             }
@@ -400,7 +403,7 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
         if param_type.is_empty() {
             // Look for any word with angle brackets (generic types)
             for word in &words {
-                if word.contains('<') && word.contains('>') {
+                if word.contains('<') && word.contains('>') && !word.starts_with('@') {
                     param_type = word.to_string();
                     break;
                 }
@@ -418,9 +421,6 @@ fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Arg
         return None;
     }
     
-    // Debug: print the S-expression of the parameter node
-    // println!("DEBUG PARAMETER S-EXPR: {}", parameter_node.to_sexp());
-
     Some(Argument {
         annotations,
         name,

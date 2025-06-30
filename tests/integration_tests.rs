@@ -310,7 +310,7 @@ const factory AnnotatedClass(
       
       let age_arg = &class.positional_arguments[1];
       assert_eq!(age_arg.name, "age");
-      assert_eq!(age_arg.r#type, "required");
+      assert_eq!(age_arg.r#type, "int");
       assert_eq!(age_arg.is_required, true);
       assert_eq!(age_arg.annotations.len(), 1);
       assert!(age_arg.annotations[0].contains("@JsonKey"));
@@ -459,7 +459,7 @@ factory Test.fromJson(Map<String, dynamic> json) => _$TestFromJson(json);
 "#;
       
       let mixin_code = generate_mixin(code.to_string());
-      
+      println!("{}", mixin_code);
       // Check that the mixin contains the expected elements
       assert!(mixin_code.contains("mixin _$Test {"));
       assert!(mixin_code.contains("  int get i;"));
@@ -596,4 +596,48 @@ GenericsTest._();
       assert!(mixin_code.contains("GenericsTest copyWith({List<int>? ints, Map<String, List<int>>? complex});"));
       assert!(mixin_code.contains("ints: ints == null ? this.ints : ints as List<int>"));
       assert!(mixin_code.contains("complex: complex == null ? this.complex : complex as Map<String, List<int>>"));
+  }
+
+  #[test]
+  fn test_generate_mixin_with_json_converter() {
+      let code = r#"
+@freezed
+abstract class JsonConverterTest with _$JsonConverterTest {
+factory JsonConverterTest({
+  required int id,
+  @DurationJsonConverter() required Duration duration,
+  @CustomJsonConverter() String? nullableField,
+  @ListJsonConverter() required List<int> numbers,
+}) = _JsonConverterTest;
+JsonConverterTest._();
+factory JsonConverterTest.fromJson(Map<String, dynamic> json) => _$JsonConverterTestFromJson(json);
+}
+"#;
+      
+      let mixin_code = generate_mixin(code.to_string());
+      println!("{}", mixin_code);
+      // Check that the mixin contains the expected elements
+      assert!(mixin_code.contains("mixin _$JsonConverterTest {"));
+      assert!(mixin_code.contains("  int get id;"));
+      assert!(mixin_code.contains("  Duration get duration;"));
+      assert!(mixin_code.contains("  String? get nullableField;"));
+      assert!(mixin_code.contains("  List<int> get numbers;"));
+      assert!(mixin_code.contains("  Map<String, dynamic> toJson();"));
+      
+      // Check that the class implementation contains the expected elements
+      assert!(mixin_code.contains("class _JsonConverterTest extends JsonConverterTest {"));
+      assert!(mixin_code.contains("  factory _JsonConverterTest.fromJson(Map<String, dynamic> json) => _$JsonConverterTestFromJson(json);"));
+      assert!(mixin_code.contains("  @override\n  Map<String, dynamic> toJson() {\n    return _$JsonConverterTestToJson(this);\n  }"));
+      
+      // Check that the fromJson function uses JsonConverter for decorated fields
+      assert!(mixin_code.contains("id: (json['id'] as num).toInt()"));
+      assert!(mixin_code.contains("duration: const DurationJsonConverter().fromJson((json['duration'] as num).toInt())"));
+      assert!(mixin_code.contains("nullableField: json['nullableField'] == null ? null : const CustomJsonConverter().fromJson((json['nullableField'] as num).toInt())"));
+      assert!(mixin_code.contains("numbers: const ListJsonConverter().fromJson((json['numbers'] as num).toInt())"));
+      
+      // Check that the toJson function uses JsonConverter for decorated fields
+      assert!(mixin_code.contains("'id': instance.id"));
+      assert!(mixin_code.contains("'duration': const DurationJsonConverter().toJson(instance.duration)"));
+      assert!(mixin_code.contains("'nullableField': const CustomJsonConverter().toJson(instance.nullableField)"));
+      assert!(mixin_code.contains("'numbers': const ListJsonConverter().toJson(instance.numbers)"));
   }
