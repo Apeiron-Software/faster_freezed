@@ -1,35 +1,43 @@
-use crate::freezed_class::{Argument, FreezedClass};
+use crate::freezed_class::{
+    Annotation, DartType, FreezedClass2, NamedArgument, RedirectedConstructor,
+};
 use lazy_static::lazy_static;
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Parser, QueryCursor};
 
-const FREEZED_CLASS: &str =
-    "((marker_annotation) @freezed_marker . (class_definition) @class_definition)";
-const CLASS_MEMBER_DEFINITION: &str = "(class_member_definition) @member";
+const FREEZED_CLASS: &str = "(class_definition (annotation) @freezed_marker) @class_definition";
+const CLASS_MEMBER_DEFINITION: &str =
+    "((declaration) @member)\n((factory_constructor_signature) @member)";
 const REDIRECTING_FACTORY_CONSTRUCTOR_SIGNATURE: &str =
     "(redirecting_factory_constructor_signature) @constructor";
 const FORMAL_PARAMETER: &str = "(formal_parameter) @parameter";
 const UNNAMED_CONSTRUCTOR: &str = "(constructor_signature) @unnamed_constructor";
 
+unsafe extern "C" {
+    pub fn tree_sitter_dart() -> tree_sitter::Language;
+}
+
 lazy_static! {
-    static ref DART_TS: tree_sitter::Language = tree_sitter_dart::language();
+    pub static ref DART_TS: tree_sitter::Language = unsafe { tree_sitter_dart() };
     static ref freezed_class_q: tree_sitter::Query =
         tree_sitter::Query::new(&DART_TS, FREEZED_CLASS).expect("hardcoded");
     static ref members_q: tree_sitter::Query =
         tree_sitter::Query::new(&DART_TS, CLASS_MEMBER_DEFINITION).expect("hardcoded");
-    static ref redirecting_factory_q: tree_sitter::Query = tree_sitter::Query::new(
-        &tree_sitter_dart::language(),
-        REDIRECTING_FACTORY_CONSTRUCTOR_SIGNATURE,
-    )
-    .expect("hardcoded");
+    static ref redirecting_factory_q: tree_sitter::Query =
+        tree_sitter::Query::new(&DART_TS, REDIRECTING_FACTORY_CONSTRUCTOR_SIGNATURE,)
+            .expect("hardcoded");
     static ref formal_parameter_q: tree_sitter::Query =
         tree_sitter::Query::new(&DART_TS, FORMAL_PARAMETER).expect("hardcoded");
     static ref unnamed_constructor_q: tree_sitter::Query =
         tree_sitter::Query::new(&DART_TS, UNNAMED_CONSTRUCTOR).expect("hardcoded");
 }
 
+pub fn get_text(node: tree_sitter::Node, code: &str) -> String {
+    node.utf8_text(code.as_bytes()).unwrap().to_owned()
+}
+
 /// Parse Dart code and extract all classes with @freezed annotation
-pub fn parse_dart_code(code: &str) -> Vec<FreezedClass> {
+pub fn parse_dart_code(code: &str) -> Vec<FreezedClass2> {
     let mut parser = Parser::new();
     parser
         .set_language(&DART_TS)
@@ -37,427 +45,463 @@ pub fn parse_dart_code(code: &str) -> Vec<FreezedClass> {
     let tree = parser.parse(code, None).unwrap();
 
     let mut query_cursor = QueryCursor::new();
-    let mut freezed_classes = Vec::new();
+    let mut output_freezed_classes = Vec::new();
 
-    let mut test = query_cursor.matches(&freezed_class_q, tree.root_node(), code.as_bytes());
+    let mut class_with_annotation_matches =
+        query_cursor.matches(&freezed_class_q, tree.root_node(), code.as_bytes());
 
-    while let Some(class_definition) = test.next() {
-        let _freezed_annotation = class_definition.nodes_for_capture_index(0).next().unwrap();
-        let class_body = class_definition.nodes_for_capture_index(1).next().unwrap();
-        let class_name = class_body
+    while let Some(class_with_annotation) = class_with_annotation_matches.next() {
+        // We can get multiple matches, but we only get one freezed annotation
+        let _freezed_annotation = class_with_annotation
+            .nodes_for_capture_index(0)
+            .next()
+            .unwrap();
+        // We can get multiple body matches, but there's only one body
+        let class_declaration = class_with_annotation
+            .nodes_for_capture_index(1)
+            .next()
+            .unwrap();
+        let class_name = class_declaration
             .child_by_field_name("name")
             .unwrap()
             .utf8_text(code.as_bytes())
             .unwrap();
 
-        let mut positional_arguments = Vec::new();
-        let mut named_arguments = Vec::new();
-        let mut has_json = false;
-        let mut has_const_constructor = false;
-
+        let mut redirecting_constructors = Vec::new();
         let mut class_query = QueryCursor::new();
-        let mut executed_query = class_query.matches(&members_q, class_body, code.as_bytes());
 
-        while let Some(declaration) = executed_query.next() {
-            let declaration_node = declaration.nodes_for_capture_index(0).next().unwrap();
-            let declaration_text = declaration_node.utf8_text(code.as_bytes()).unwrap();
+        let mut executed_query =
+            class_query.matches(&members_q, class_declaration, code.as_bytes());
 
-            // Check if this is a fromJson constructor
-            if declaration_text.contains("fromJson") {
-                has_json = true;
-                continue;
-            }
-
-            // Check for unnamed constructor (._())
-            let mut unnamed_constructor_cursor = QueryCursor::new();
-            let mut unnamed_constructor_matches = unnamed_constructor_cursor.matches(
-                &unnamed_constructor_q,
-                declaration_node,
-                code.as_bytes(),
-            );
-
-            if let Some(_unnamed_constructor) = unnamed_constructor_matches.next() {
-                // Check if the constructor has the const keyword
-                if declaration_text.contains("const") {
-                    has_const_constructor = true;
-                }
-                continue;
-            }
-
-            // Alternative approach: look for the pattern "const ClassName._()"
-            if declaration_text.contains("const") && declaration_text.contains("._()") {
-                has_const_constructor = true;
-                continue;
-            }
-
-            let mut redirecting_factory = QueryCursor::new();
-            let mut query = redirecting_factory.matches(
-                &redirecting_factory_q,
-                declaration_node,
-                code.as_bytes(),
-            );
-
-            if let Some(factory) = query.next() {
-                // If the factory declaration is const, set has_const_constructor = true
-                if declaration_text.contains("const factory") {
-                    has_const_constructor = true;
-                }
-                let factory_node = factory.nodes_for_capture_index(0).next().unwrap();
-                let mut parameter_cursor = QueryCursor::new();
-                let mut parameter_matches =
-                    parameter_cursor.matches(&formal_parameter_q, factory_node, code.as_bytes());
-
-                while let Some(parameter_match) = parameter_matches.next() {
-                    let parameter_node = parameter_match.nodes_for_capture_index(0).next().unwrap();
-
-                    if let Some(argument) = parse_parameter(parameter_node, code.as_bytes()) {
-                        let parameter_start = parameter_node.start_byte();
-                        let factory_text_bytes =
-                            factory_node.utf8_text(code.as_bytes()).unwrap_or("");
-
-                        let brace_start = factory_text_bytes.find('{');
-                        let brace_end = factory_text_bytes.rfind('}');
-
-                        let is_named = if let (Some(start), Some(end)) = (brace_start, brace_end) {
-                            let relative_start = parameter_start - factory_node.start_byte();
-                            relative_start > start && relative_start < end
-                        } else {
-                            false
-                        };
-
-                        if is_named {
-                            named_arguments.push(argument);
-                        } else {
-                            positional_arguments.push(argument);
-                        }
-                    }
-                }
+        while let Some(inner_declaration_group) = executed_query.next() {
+            assert!(inner_declaration_group.captures.len() == 1);
+            let capture = inner_declaration_group.captures.first().unwrap();
+            let x = parse_class_declaration(capture.node, code);
+            if let Some(y) = x {
+                redirecting_constructors.push(y);
             }
         }
 
-        let freezed_class = FreezedClass {
+        let freezed_class = FreezedClass2 {
             name: class_name.to_string(),
-            positional_arguments,
-            optional_arguments: Vec::new(),
-            named_arguments,
-            has_json,
-            has_const_constructor,
+            redirecting_constructors,
         };
 
-        freezed_classes.push(freezed_class);
+        output_freezed_classes.push(freezed_class);
     }
 
-    freezed_classes
+    output_freezed_classes
 }
 
-#[derive(Debug, Clone)]
-struct Type {
-    name: String,
-    nullable: bool,
-    type_arguments: Vec<Type>,
+enum RedirectingFactoryItems {
+    Const,
+    FactoryKeyword,
+    ClassName,
+    ConstructorName,
+    FormalParameterList,
+    AssignedConstructor,
 }
 
-impl Type {
-    fn to_string(&self) -> String {
-        let mut s = self.name.clone();
-        if !self.type_arguments.is_empty() {
-            s.push('<');
-            s.push_str(
-                &self
-                    .type_arguments
-                    .iter()
-                    .map(|t| t.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            );
-            s.push('>');
-        }
-        if self.nullable {
-            s.push('?');
-        }
-        s
-    }
-}
+fn parse_class_declaration(node: tree_sitter::Node, code: &str) -> Option<RedirectedConstructor> {
+    let first_child = node.child(0).unwrap();
 
-fn print_ts_tree(node: tree_sitter::Node, text: &[u8], depth: usize) {
-    let indent = "  ".repeat(depth);
-    let node_text = node.utf8_text(text).unwrap_or("");
-    println!(
-        "{}[TS] kind: {}, text: '{}', range: {:?}",
-        indent,
-        node.kind(),
-        node_text,
-        node.range()
-    );
-    for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            print_ts_tree(child, text, depth + 1);
-        }
-    }
-}
+    if first_child.kind() == "redirecting_factory_constructor_signature" {
+        assert!(node.child_count() == 1);
+        let redirecting_constructor = first_child;
 
-fn parse_type(node: tree_sitter::Node, text: &[u8]) -> Option<Type> {
-    print_ts_tree(node, text, 0);
-    match node.kind() {
-        "formal_parameter" | "type" | "generic_type" => {
-            let mut name = String::new();
-            let mut type_arguments = Vec::new();
-            let mut nullable = false;
-            let mut found_type_name = false;
-            let mut i = 0;
-            while i < node.child_count() {
-                if let Some(child) = node.child(i) {
-                    match child.kind() {
-                        "type_identifier" | "identifier" => {
-                            if !found_type_name {
-                                name = child.utf8_text(text).unwrap_or("").to_string();
-                                found_type_name = true;
-                                // Check if next sibling is type_arguments
-                                if let Some(next_child) = node.child(i + 1) {
-                                    if next_child.kind() == "type_arguments" {
-                                        type_arguments = parse_type_arguments(next_child, text);
-                                        i += 1; // skip type_arguments node
-                                    }
-                                }
-                            }
+        // redirecting_factory_constructor_signature: $ => seq(
+        //     optional($.const_builtin),
+        //     $._factory,
+        //     sep1($.identifier, '.'),
+        //     $.formal_parameter_list,
+        //     '=',
+        //     $._type_not_void,
+        //     optional(seq('.', $.identifier)),
+        // ),
+        let mut is_const = false;
+        let mut class_name = String::new();
+        let mut constructor_name: Option<String> = None;
+        let mut assigned_type: Option<DartType> = None;
+
+        let mut arguments = Vec::<NamedArgument>::new();
+        let mut stage = RedirectingFactoryItems::Const;
+        let mut cursor = redirecting_constructor.walk();
+
+        let mut was_processed = 0;
+        for child in redirecting_constructor.children(&mut cursor) {
+            while was_processed == 0 {
+                match stage {
+                    RedirectingFactoryItems::Const => {
+                        if child.kind() == "const_builtin" {
+                            is_const = true;
+                            was_processed = 1;
                         }
-                        "type_arguments" => {
-                            // If we didn't just process this as a sibling, parse as extra type arguments
-                            let extra_args = parse_type_arguments(child, text);
-                            type_arguments.extend(extra_args);
-                        }
-                        "?" => {
-                            nullable = true;
-                        }
-                        _ => {}
+                        stage = RedirectingFactoryItems::FactoryKeyword;
                     }
-                }
-                i += 1;
-            }
-            if !name.is_empty() {
-                let t = Type {
-                    name,
-                    nullable,
-                    type_arguments,
-                };
-                Some(t)
-            } else {
-                // Try to find a type node among children
-                for i in 0..node.child_count() {
-                    if let Some(child) = node.child(i) {
-                        if ["type", "generic_type", "type_identifier"].contains(&child.kind()) {
-                            return parse_type(child, text);
+                    RedirectingFactoryItems::FactoryKeyword => {
+                        assert!(child.kind() == "factory");
+                        was_processed = 1;
+                        stage = RedirectingFactoryItems::ClassName;
+                    }
+                    RedirectingFactoryItems::ClassName => {
+                        assert!(child.kind() == "identifier");
+                        class_name = child.utf8_text(code.as_bytes()).unwrap().to_owned();
+                        was_processed = 1;
+                        stage = RedirectingFactoryItems::ConstructorName;
+                    }
+                    RedirectingFactoryItems::ConstructorName => {
+                        if child.kind() == "." {
+                            was_processed = 1;
+                        } else if child.kind() == "identifier" {
+                            constructor_name =
+                                Some(child.utf8_text(code.as_bytes()).unwrap().to_owned());
+                            was_processed = 1;
+                            stage = RedirectingFactoryItems::FormalParameterList;
+                        } else if child.kind() == "formal_parameter_list" {
+                            stage = RedirectingFactoryItems::FormalParameterList;
+                        } else {
+                            panic!("Wrong syntax");
                         }
                     }
-                }
-                None
-            }
-        }
-        "type_arguments" => {
-            // Should not return a Type, handled by helper
-            None
-        }
-        "type_identifier" | "identifier" => {
-            let name = node.utf8_text(text).unwrap_or("").to_string();
-            Some(Type {
-                name,
-                nullable: false,
-                type_arguments: Vec::new(),
-            })
-        }
-        _ => None,
-    }
-}
-
-// Helper to parse type_arguments node into Vec<Type>
-fn parse_type_arguments(node: tree_sitter::Node, text: &[u8]) -> Vec<Type> {
-    let mut args = Vec::new();
-    let mut i = 0;
-    while i < node.child_count() {
-        if let Some(child) = node.child(i) {
-            if child.kind() == "type_identifier" {
-                // Check if next sibling is a type_arguments node
-                if let Some(next_child) = node.child(i + 1) {
-                    if next_child.kind() == "type_arguments" {
-                        // Recursively parse type arguments for this type_identifier
-                        let name = child.utf8_text(text).unwrap_or("").to_string();
-                        let type_arguments = parse_type_arguments(next_child, text);
-                        let t = Type {
-                            name,
-                            nullable: false,
-                            type_arguments,
-                        };
-                        args.push(t);
-                        i += 2;
-                        continue;
+                    RedirectingFactoryItems::FormalParameterList => {
+                        arguments = parse_formal_parameter_list(child, code);
+                        was_processed = 1;
+                        stage = RedirectingFactoryItems::AssignedConstructor;
                     }
-                }
-                // Otherwise, just a plain type_identifier
-                let name = child.utf8_text(text).unwrap_or("").to_string();
-                let t = Type {
-                    name,
-                    nullable: false,
-                    type_arguments: Vec::new(),
-                };
-                args.push(t);
-            } else if ["type", "generic_type"].contains(&child.kind()) {
-                if let Some(arg_type) = parse_type(child, text) {
-                    args.push(arg_type);
-                }
-            }
-        }
-        i += 1;
-    }
-    args
-}
-
-fn parse_parameter(parameter_node: tree_sitter::Node, text: &[u8]) -> Option<Argument> {
-    let mut annotations = Vec::new();
-    let mut name = String::new();
-    let mut param_type = String::new();
-    let mut default_value = None;
-    let mut is_required = false;
-
-    // Check if this parameter is marked as required by looking at siblings
-    if let Some(parent) = parameter_node.parent() {
-        for i in 0..parent.child_count() {
-            if let Some(sibling) = parent.child(i) {
-                if sibling.kind() == "required" {
-                    // Check if this required keyword applies to our parameter
-                    if let Some(next_sibling) = parent.child(i + 1) {
-                        if next_sibling.id() == parameter_node.id() {
-                            is_required = true;
-                            break;
+                    RedirectingFactoryItems::AssignedConstructor => {
+                        if child.kind() == "=" {
+                            was_processed = 1;
+                        } else {
+                            let (dart_type, skipped) = parse_type(child, code);
+                            assigned_type = Some(dart_type);
+                            was_processed = skipped;
                         }
                     }
                 }
             }
+            was_processed -= 1;
         }
-    }
-
-    // --- NEW TYPE EXTRACTION LOGIC ---
-    dbg!("DEBUGGING PARAMETER NODE");
-    print_ts_tree(parameter_node, text, 0);
-    if let Some(parsed_type) = parse_type(parameter_node, text) {
-        param_type = parsed_type.to_string();
-    }
-    // --- END NEW TYPE EXTRACTION LOGIC ---
-
-    // Parse annotations and other elements
-    for i in 0..parameter_node.child_count() {
-        if let Some(child) = parameter_node.child(i) {
-            match child.kind() {
-                "annotation" => {
-                    if let Ok(annotation_text) = child.utf8_text(text) {
-                        // Parse the annotation content
-                        if annotation_text.starts_with("@Default(") {
-                            // Extract the default value from @Default("value")
-                            if let Some(start) = annotation_text.find('(') {
-                                if let Some(end) = annotation_text.rfind(')') {
-                                    let default_val = &annotation_text[start + 1..end];
-                                    // Remove quotes if present
-                                    let default_val = default_val.trim_matches('"');
-                                    default_value = Some(default_val.to_string());
-                                }
-                            }
-                        }
-                        annotations.push(annotation_text.to_string());
-                    }
-                }
-                "identifier" => {
-                    if let Ok(name_text) = child.utf8_text(text) {
-                        // Skip "required" and annotations as parameter name
-                        if name_text != "required" && !name_text.starts_with('@') {
-                            name = name_text.to_string();
-                        }
-                    }
-                }
-                "=" => {
-                    // Default value follows
-                    if let Some(next_sibling) = parameter_node.child(i + 1) {
-                        if let Ok(default_text) = next_sibling.utf8_text(text) {
-                            default_value = Some(default_text.to_string());
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    // If we found a "required" keyword in the parameter text itself, mark it as required
-    let parameter_text = parameter_node.utf8_text(text).unwrap_or("");
-    if parameter_text.contains("required") {
-        is_required = true;
-    }
-
-    // If we still don't have a name or type, try to extract them from the parameter text
-    if name.is_empty() || param_type.is_empty() {
-        let parts: Vec<&str> = parameter_text.split_whitespace().collect();
-        let mut skip_next = false;
-
-        for part in parts.iter() {
-            if skip_next {
-                skip_next = false;
-                continue;
-            }
-
-            if *part == "required" {
-                is_required = true;
-            } else if part.starts_with('@') {
-                // Skip annotations and their content
-                if part.contains('(') && !part.ends_with(')') {
-                    skip_next = true;
-                }
-            } else if param_type.is_empty() && *part != "required" && !part.starts_with('@') {
-                param_type = part.to_string();
-            } else if name.is_empty()
-                && *part != "required"
-                && *part != param_type
-                && !part.starts_with('@')
-            {
-                name = part.to_string();
-            }
-        }
-    }
-
-    // If we still don't have a complete type, try to extract the full type from the parameter text
-    if param_type.is_empty() || param_type.len() < 3 {
-        let parameter_text = parameter_node.utf8_text(text).unwrap_or("");
-        // Look for patterns like "List<String>", "Map<String, int>", etc.
-        let words: Vec<&str> = parameter_text.split_whitespace().collect();
-
-        // First try specific collection types
-        for word in &words {
-            if (word.starts_with("List<") || word.starts_with("Map<") || word.starts_with("Set<"))
-                && !word.starts_with("@")
-            {
-                param_type = word.to_string();
-                break;
-            }
-        }
-
-        // If still empty, try a more comprehensive approach
-        if param_type.is_empty() {
-            // Look for any word with angle brackets (generic types)
-            for word in &words {
-                if word.contains('<') && word.contains('>') && !word.starts_with('@') {
-                    param_type = word.to_string();
-                    break;
-                }
-            }
-        }
-    }
-
-    if name.is_empty() || param_type.is_empty() {
+        return Some(RedirectedConstructor {
+            class_name,
+            is_const,
+            constructor_name,
+            named_arguments: arguments,
+            assigned_type: assigned_type.unwrap(),
+        });
+    } else if node.kind() == "factory_constructor_signature" {
+        if let Some(child) = node.named_child(1)
+            && get_text(child, code) == "fromJson"
+        {}
+        return Some(RedirectedConstructor {
+            class_name: "fromJson".to_string(),
+            is_const: false,
+            constructor_name: Some("".to_string()),
+            named_arguments: Vec::new(),
+            assigned_type: DartType::default(),
+        });
+        // print_ts_tree(node, code, 0);
+        // return RedirectedConstructor {
+        //     class_name: "".to_string(),
+        //     is_const: false,
+        //     constructor_name: Some("".to_string()),
+        //     named_arguments: Vec::new(),
+        //     assigned_type: DartType::default(),
+        // };
+    } else if first_child.kind() == "constructor_signature" {
+        assert_eq!(get_text(first_child.named_child(1).unwrap(), code), "_");
+        // TODO, maybe fix??
+        return Some(RedirectedConstructor {
+            class_name: "_".to_string(),
+            is_const: false,
+            constructor_name: Some("".to_string()),
+            named_arguments: Vec::new(),
+            assigned_type: DartType::default(),
+        });
+    } else if node.kind() == "declaration" {
         return None;
     }
 
-    Some(Argument {
-        annotations,
-        name,
-        r#type: param_type,
-        default_value,
-        is_required,
-    })
+    todo!(
+        "Unimplemented: first: {}, node: {}",
+        first_child.kind(),
+        node.kind()
+    );
+}
+
+// FORMAL PARAMETER GRAMMAR
+// seq(
+//     optional(
+//         $._metadata
+//     ),
+//     optional(
+//         $._required
+//     ),
+//     $.formal_parameter,
+//     optional(
+//         seq(
+//             '=',
+//             $._expression
+//         )
+//     )
+// ),
+//
+// _normal_formal_parameter: $ => seq(
+//     optional(
+//         $._metadata
+//     ), // Can't have metadata as argument here
+//     choice(
+//         $._function_formal_parameter,
+//         $._simple_formal_parameter,
+//         $.constructor_param,
+//         $.super_formal_parameter
+//     )
+// ),
+
+#[derive(Debug, Clone, Copy)]
+enum FormalParameterSteps {
+    OpenBracket,
+    Annotations,
+    Required,
+    FormalParameter,
+    DefaultValue,
+    CloseBracket,
+    Finish,
+}
+
+fn parse_formal_parameter_list(node: tree_sitter::Node, code: &str) -> Vec<NamedArgument> {
+    assert!(node.kind() == "formal_parameter_list");
+
+    // Only optional parameters for now
+    let optional_node = node.named_child(0).unwrap();
+
+    let mut cursor = optional_node.walk();
+    let mut current_state = FormalParameterSteps::OpenBracket;
+
+    let mut arguments: Vec<NamedArgument> = Vec::new();
+    let mut processing_argument = false;
+
+    let mut current_argument: Option<NamedArgument> = None;
+
+    for child in optional_node.children(&mut cursor) {
+        let mut was_processed = false;
+        while !was_processed {
+            match current_state {
+                FormalParameterSteps::OpenBracket => {
+                    assert_eq!(child.kind(), "{");
+                    processing_argument = true;
+                    was_processed = true;
+                    current_state = FormalParameterSteps::Annotations;
+                }
+                FormalParameterSteps::Annotations => {
+                    if current_argument.is_none() {
+                        current_argument = Some(NamedArgument::default());
+                    }
+
+                    assert!(processing_argument);
+                    if child.kind() == "}" {
+                        was_processed = true;
+                        current_state = FormalParameterSteps::CloseBracket;
+                    } else if child.kind() == "annotation" {
+                        was_processed = true;
+                        let name_node = child.child_by_field_name("name").unwrap();
+                        let mut argument_node = name_node
+                            .next_named_sibling()
+                            .and_then(|e| e.named_child(0));
+
+                        let name = get_text(name_node, code);
+                        let mut arguments = Vec::new();
+                        while let Some(arg) = argument_node {
+                            arguments.push(get_text(arg, code));
+                            argument_node = arg.next_named_sibling();
+                        }
+
+                        current_argument
+                            .as_mut()
+                            .unwrap()
+                            .annotations
+                            .push(Annotation { name, arguments });
+                    } else {
+                        was_processed = false;
+                        current_state = FormalParameterSteps::Required;
+                    }
+                }
+                FormalParameterSteps::Required => {
+                    if child.kind() == "required" {
+                        current_argument.as_mut().unwrap().is_required = true;
+                        was_processed = true;
+                    }
+                    current_state = FormalParameterSteps::FormalParameter;
+                }
+                FormalParameterSteps::FormalParameter => {
+                    assert_eq!(child.kind(), "formal_parameter");
+                    let x = parse_formal_parameter(child, code);
+
+                    current_argument.as_mut().unwrap().name = x.name;
+                    current_argument.as_mut().unwrap().argument_type = x.argument_type;
+
+                    was_processed = true;
+                    current_state = FormalParameterSteps::DefaultValue;
+                }
+                FormalParameterSteps::DefaultValue => {
+                    if child.kind() == "=" {
+                        was_processed = true;
+                    } else if child.kind() == "," {
+                        was_processed = true;
+                        current_state = FormalParameterSteps::Annotations;
+                        arguments.push(current_argument.unwrap());
+                        current_argument = None;
+                    } else if child.kind() == "}" {
+                        was_processed = false;
+                        current_state = FormalParameterSteps::CloseBracket;
+                    } else {
+                        // TODO, default value
+                        unreachable!("What the fuck are you: {}", child.kind());
+                    }
+                }
+                FormalParameterSteps::CloseBracket => {
+                    assert_eq!(child.kind(), "}");
+                    was_processed = true;
+                    current_state = FormalParameterSteps::Finish;
+                }
+                FormalParameterSteps::Finish => unreachable!(),
+            }
+        }
+    }
+    arguments
+}
+
+fn parse_formal_parameter(node: tree_sitter::Node, code: &str) -> NamedArgument {
+    assert_eq!(node.kind(), "formal_parameter");
+    // DEBUG
+    {
+        println!("PARAMETER:");
+        print_ts_element(node, code, 0);
+        println!("TREE:");
+        print_ts_tree(node, code, 0);
+    }
+
+    let (argument_type, skipped) = parse_type(node.named_child(0).unwrap(), code);
+    let identifier = node.named_child(skipped).unwrap();
+
+    assert_eq!(identifier.kind(), "identifier");
+    let argument_name = get_text(identifier, code);
+
+    NamedArgument {
+        name: argument_name,
+        argument_type,
+        ..Default::default()
+    }
+}
+
+//  - Function type ???
+//  - _typeName, arguments, nullable
+//  - Record
+
+fn parse_type(node: tree_sitter::Node, code: &str) -> (DartType, usize) {
+    let mut processed = 0;
+    let mut name: String = String::new();
+    let mut type_arguments = Vec::new();
+    let mut current_node = Some(node);
+    let mut nullable = false;
+
+    if node.kind() == "record_type" {
+        todo!();
+    }
+
+    if let Some(node) = current_node
+        && node.kind() == "type_identifier"
+    {
+        name = get_text(node, code);
+
+        processed += 1;
+        current_node = node.next_named_sibling();
+    }
+
+    if let Some(node) = current_node
+        && node.kind() == "type_arguments"
+    {
+        //let arguments_node = current_node.named_child(0).unwrap();
+        let mut current_child = 0;
+
+        while current_child < node.named_child_count() {
+            let (dart_type, skipped) = parse_type(node.named_child(current_child).unwrap(), code);
+            type_arguments.push(dart_type);
+            current_child += skipped;
+        }
+        processed += 1;
+        current_node = node.next_named_sibling();
+    }
+
+    if let Some(node) = current_node
+        && node.kind() == "nullable_type"
+    {
+        processed += 1;
+        nullable = true;
+        //current_node = node.next_named_sibling().unwrap();
+    }
+
+    (
+        DartType {
+            name,
+            nullable,
+            type_arguments,
+        },
+        processed,
+    )
+}
+
+fn print_ts_element(node: tree_sitter::Node, code: &str, depth: usize) {
+    let indent = "  ".repeat(depth);
+    let node_text = node.utf8_text(code.as_bytes()).unwrap_or("");
+    println!(
+        "{}[TS] kind: {}, text: '{}'",
+        indent,
+        node.kind(),
+        node_text,
+    );
+}
+
+fn print_ts_tree(node: tree_sitter::Node, code: &str, depth: usize) {
+    let indent = "  ".repeat(depth);
+    let node_text = node.utf8_text(code.as_bytes()).unwrap_or("");
+    println!(
+        "{}[TS] kind: {}, text: '{}'",
+        indent,
+        node.kind(),
+        node_text,
+    );
+
+    for i in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(i) {
+            print_ts_tree(child, code, depth + 1);
+        }
+    }
+}
+
+// fn print_ts_tree_unnamed(node: tree_sitter::Node, text: &str, depth: usize) {
+//     let indent = "  ".repeat(depth);
+//     let node_text = node.utf8_text(text.as_bytes()).unwrap_or("");
+//     println!(
+//         "{}[TS] kind: {}, text: '{}'",
+//         indent,
+//         node.kind(),
+//         node_text,
+//     );
+//
+//     for i in 0..node.child_count() {
+//         if let Some(child) = node.child(i) {
+//             print_ts_tree_unnamed(child, text, depth + 1);
+//         }
+//     }
+// }
+
+/// Print the tree-sitter parse tree for the given Dart code (for debugging)
+pub fn print_ts_tree_for_code(code: &str) {
+    let mut parser = Parser::new();
+    parser
+        .set_language(&DART_TS)
+        .expect("Error loading Dart grammar");
+    let tree = parser.parse(code, None).unwrap();
+    let root = tree.root_node();
+    print_ts_tree(root, code, 0);
 }

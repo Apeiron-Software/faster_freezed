@@ -8,4 +8,6 @@ lazy_static = "1.5.0"
 pathdiff = "0.2.3"
 streaming-iterator = "0.1.9"
 tree-sitter = "0.24.7"
-tree-sitter-dart = "0.0.4"
+
+[build-dependencies]
+cc = "1.0"

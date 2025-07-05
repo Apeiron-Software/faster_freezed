@@ -1,10 +1,25 @@
+use faster_freezed::freezed_class::FreezedClass2;
+use faster_freezed::freezed_class::NamedArgument;
 use faster_freezed::parse_freezed_classes;
+use faster_freezed::parser::parse_dart_code;
+use faster_freezed::parser::print_ts_tree_for_code;
 use std::env;
 use std::fs;
 use std::path::Path;
 
+fn my_little_test() {
+    let content = fs::read_to_string("test.dart").unwrap();
+    //print_ts_tree_for_code(&content);
+    parse_dart_code(&content);
+    println!("finished, haha cleanup");
+}
+
 fn main() {
+    // my_little_test();
+    // return;
+
     let args: Vec<String> = env::args().collect();
+
     if args.len() != 2 {
         eprintln!("Usage: {} <directory>", args[0]);
         std::process::exit(1);
@@ -57,7 +72,7 @@ fn process_dart_file(file_path: &Path) -> Result<(), Box<dyn std::error::Error>>
     // Read file content
     let content = fs::read_to_string(file_path)?;
 
-    // Check if file contains @freezed
+    // If file doesn't contain @freezed we skip it
     if !content.contains("@freezed") {
         return Ok(());
     }
@@ -91,7 +106,7 @@ fn process_dart_file(file_path: &Path) -> Result<(), Box<dyn std::error::Error>>
 fn generate_output_files(
     generated_dir: &Path,
     file_stem: &str,
-    classes: &[faster_freezed::freezed_class::FreezedClass],
+    classes: &[FreezedClass2],
     original_file_path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use std::path::PathBuf;
@@ -127,11 +142,11 @@ fn generate_output_files(
     Ok(())
 }
 
-fn generate_mixin_for_classes(classes: &[faster_freezed::freezed_class::FreezedClass]) -> String {
+fn generate_mixin_for_classes(classes: &[faster_freezed::freezed_class::FreezedClass2]) -> String {
     let mut output = String::new();
 
     for class in classes {
-        if class.has_json {
+        if class.has_json() {
             // Generate the mixin and class implementation
             let class_mixin = generate_single_class_mixin(class);
             output.push_str(&class_mixin);
@@ -141,10 +156,15 @@ fn generate_mixin_for_classes(classes: &[faster_freezed::freezed_class::FreezedC
     output
 }
 
-fn generate_single_class_mixin(class: &faster_freezed::freezed_class::FreezedClass) -> String {
-    let mut all_fields = Vec::new();
-    all_fields.extend(&class.positional_arguments);
-    all_fields.extend(&class.named_arguments);
+fn generate_single_class_mixin(class: &FreezedClass2) -> String {
+    let main_constructor = class
+        .redirecting_constructors
+        .iter()
+        .filter(|e| e.class_name == class.name)
+        .next()
+        .unwrap();
+
+    let all_fields = &main_constructor.named_arguments;
 
     if all_fields.is_empty() {
         return String::new();
@@ -175,7 +195,7 @@ fn generate_single_class_mixin(class: &faster_freezed::freezed_class::FreezedCla
     ));
 
     // Generate toJson method declaration in mixin (only if has_json is true)
-    if class.has_json {
+    if class.has_json() {
         output.push_str("  Map<String, dynamic> toJson();\n");
     }
 
@@ -202,7 +222,7 @@ fn generate_single_class_mixin(class: &faster_freezed::freezed_class::FreezedCla
     ));
 
     // Add toJson method implementation if has_json is true
-    if class.has_json {
+    if class.has_json() {
         output.push_str(&format!(
             "  @override\n  Map<String, dynamic> toJson() {{\n    return _${}ToJson(this);\n  }}\n",
             class.name
@@ -218,15 +238,20 @@ fn generate_single_class_mixin(class: &faster_freezed::freezed_class::FreezedCla
     output
 }
 
-fn generate_json_only_content(classes: &[faster_freezed::freezed_class::FreezedClass]) -> String {
+fn generate_json_only_content(classes: &[FreezedClass2]) -> String {
     let mut output = String::new();
     output.push_str("// GENERATED CODE - DO NOT MODIFY BY HAND\n\n");
 
     for class in classes {
-        if class.has_json {
-            let mut all_fields = Vec::new();
-            all_fields.extend(&class.positional_arguments);
-            all_fields.extend(&class.named_arguments);
+        if class.has_json() {
+            let main_constructor = class
+                .redirecting_constructors
+                .iter()
+                .filter(|e| e.class_name == class.name)
+                .next()
+                .unwrap();
+
+            let all_fields = &main_constructor.named_arguments;
 
             output.push_str(&generate_from_json_function(&class.name, &all_fields[..]));
             output.push('\n');
@@ -241,21 +266,15 @@ fn generate_json_only_content(classes: &[faster_freezed::freezed_class::FreezedC
 // Helper functions (copied from lib.rs)
 use faster_freezed::freezed_class::Argument;
 
-fn generate_getters(all_fields: &[&Argument]) -> String {
+fn generate_getters(all_fields: &[NamedArgument]) -> String {
     let getters: Vec<String> = all_fields
         .iter()
-        .map(|arg| {
-            format!(
-                "  {} get {};",
-                arg.r#type.replace("required ", "").trim(),
-                arg.name
-            )
-        })
+        .map(|arg| format!("  {} get {};", arg.argument_type.as_raw(), arg.name))
         .collect();
     getters.join("\n")
 }
 
-fn generate_equality_operator(class_name: &str, all_fields: &[&Argument]) -> String {
+fn generate_equality_operator(class_name: &str, all_fields: &[NamedArgument]) -> String {
     let mut output = String::new();
     output.push_str("  @override\n");
     output.push_str("  bool operator ==(Object other) {\n");
@@ -266,13 +285,7 @@ fn generate_equality_operator(class_name: &str, all_fields: &[&Argument]) -> Str
     let equality_checks: Vec<String> = all_fields
         .iter()
         .map(|arg| {
-            let is_collection = arg.r#type.starts_with("List<")
-                || arg.r#type.starts_with("Map<")
-                || arg.r#type.starts_with("Set<")
-                || arg.r#type == "List"
-                || arg.r#type == "Map"
-                || arg.r#type == "Set";
-            if is_collection {
+            if arg.argument_type.is_collection() {
                 format!(
                     "            && const DeepCollectionEquality().equals(other.{0}, {0})",
                     arg.name
@@ -291,7 +304,7 @@ fn generate_equality_operator(class_name: &str, all_fields: &[&Argument]) -> Str
     output
 }
 
-fn generate_hash_code(all_fields: &[&Argument]) -> String {
+fn generate_hash_code(all_fields: &[NamedArgument]) -> String {
     let mut output = String::new();
     output.push_str("\n  @override\n");
     output.push_str("  int get hashCode => Object.hash(runtimeType, ");
@@ -301,7 +314,7 @@ fn generate_hash_code(all_fields: &[&Argument]) -> String {
     output
 }
 
-fn generate_to_string(class_name: &str, all_fields: &[&Argument]) -> String {
+fn generate_to_string(class_name: &str, all_fields: &[NamedArgument]) -> String {
     let mut output = String::new();
     output.push_str("\n  @override\n");
     output.push_str("  String toString() {\n");
@@ -318,17 +331,17 @@ fn generate_to_string(class_name: &str, all_fields: &[&Argument]) -> String {
     output
 }
 
-fn generate_copy_with_declaration(class_name: &str, all_fields: &[&Argument]) -> String {
+fn generate_copy_with_declaration(class_name: &str, all_fields: &[NamedArgument]) -> String {
     let mut output = String::new();
     output.push_str(&format!("  {} copyWith({{", class_name));
     let copy_with_params: Vec<String> = all_fields
         .iter()
         .map(|arg| {
-            let is_nullable = arg.r#type.contains('?');
+            let is_nullable = arg.argument_type.nullable;
             if is_nullable {
                 format!("Object? {} = freezed", arg.name)
             } else {
-                format!("{}? {}", arg.r#type, arg.name)
+                format!("{}? {}", arg.argument_type.as_raw(), arg.name)
             }
         })
         .collect();
@@ -337,44 +350,28 @@ fn generate_copy_with_declaration(class_name: &str, all_fields: &[&Argument]) ->
     output
 }
 
-fn generate_constructor(class: &faster_freezed::freezed_class::FreezedClass) -> String {
-    let const_keyword = if class.has_const_constructor {
+fn generate_constructor(class: &faster_freezed::freezed_class::FreezedClass2) -> String {
+    let const_keyword = if class.has_const_constructor() {
         "const "
     } else {
         ""
     };
     let mut output = String::new();
 
-    if class.positional_arguments.is_empty() {
-        // Only named parameters
-        let named_params: Vec<String> = class
+    let main_constructor = class
+        .redirecting_constructors
+        .iter().find(|e| e.class_name == class.name)
+        .unwrap();
+
+    if !main_constructor.named_arguments.is_empty() {
+        // Only positional parameters
+        let pos_params: Vec<String> = main_constructor
             .named_arguments
             .iter()
             .map(|arg| {
                 if arg.is_required {
                     format!("required this.{}", arg.name)
-                } else if let Some(default) = &arg.default_value {
-                    format!("this.{} = {}", arg.name, default)
-                } else {
-                    format!("this.{}", arg.name)
-                }
-            })
-            .collect();
-        output.push_str(&format!(
-            "  {} _{} ({{{}}}) : super._();\n",
-            const_keyword,
-            class.name,
-            named_params.join(", ")
-        ));
-    } else if class.named_arguments.is_empty() {
-        // Only positional parameters
-        let pos_params: Vec<String> = class
-            .positional_arguments
-            .iter()
-            .map(|arg| {
-                if arg.is_required {
-                    format!("required this.{}", arg.name)
-                } else if let Some(default) = &arg.default_value {
+                } else if let Some(default) = &arg.default {
                     format!("this.{} = {}", arg.name, default)
                 } else {
                     format!("this.{}", arg.name)
@@ -387,64 +384,28 @@ fn generate_constructor(class: &faster_freezed::freezed_class::FreezedClass) -> 
             class.name,
             pos_params.join(", ")
         ));
-    } else {
-        // Both positional and named parameters
-        let pos_params: Vec<String> = class
-            .positional_arguments
-            .iter()
-            .map(|arg| {
-                if arg.is_required {
-                    format!("required this.{}", arg.name)
-                } else if let Some(default) = &arg.default_value {
-                    format!("this.{} = {}", arg.name, default)
-                } else {
-                    format!("this.{}", arg.name)
-                }
-            })
-            .collect();
-        let named_params: Vec<String> = class
-            .named_arguments
-            .iter()
-            .map(|arg| {
-                if arg.is_required {
-                    format!("required this.{}", arg.name)
-                } else if let Some(default) = &arg.default_value {
-                    format!("this.{} = {}", arg.name, default)
-                } else {
-                    format!("this.{}", arg.name)
-                }
-            })
-            .collect();
-        output.push_str(&format!(
-            "  {} _{} ({}, {{{}}}) : super._();\n",
-            const_keyword,
-            class.name,
-            pos_params.join(", "),
-            named_params.join(", ")
-        ));
-    }
+    } 
     output
 }
 
-fn generate_field_declarations(all_fields: &[&Argument]) -> String {
+fn generate_field_declarations(all_fields: &[NamedArgument]) -> String {
     let mut output = String::new();
     for field in all_fields {
         output.push_str(&format!(
             "  @override\n  final {} {};\n",
-            field.r#type, field.name
+            field.argument_type.as_raw(), field.name
         ));
     }
     output
 }
 
-fn generate_copy_with_implementation(class_name: &str, all_fields: &[&Argument]) -> String {
+fn generate_copy_with_implementation(class_name: &str, all_fields: &[NamedArgument]) -> String {
     let mut output = String::new();
     output.push_str(&format!("  @override\n  {} copyWith({{", class_name));
     let copy_with_params: Vec<String> = all_fields
         .iter()
         .map(|arg| {
-            let is_nullable = arg.r#type.contains('?');
-            if is_nullable {
+            if arg.argument_type.nullable {
                 format!("Object? {} = freezed", arg.name)
             } else {
                 format!("Object? {}", arg.name)
@@ -457,16 +418,15 @@ fn generate_copy_with_implementation(class_name: &str, all_fields: &[&Argument])
     let copy_with_args: Vec<String> = all_fields
         .iter()
         .map(|arg| {
-            let is_nullable = arg.r#type.contains('?');
-            if is_nullable {
+            if arg.argument_type.nullable {
                 format!(
                     "{}: freezed == {} ? this.{} : {} as {}",
-                    arg.name, arg.name, arg.name, arg.name, arg.r#type
+                    arg.name, arg.name, arg.name, arg.name, arg.argument_type.as_raw()
                 )
             } else {
                 format!(
                     "{}: {} == null ? this.{} : {} as {}",
-                    arg.name, arg.name, arg.name, arg.name, arg.r#type
+                    arg.name, arg.name, arg.name, arg.name, arg.argument_type.as_raw()
                 )
             }
         })
@@ -477,7 +437,7 @@ fn generate_copy_with_implementation(class_name: &str, all_fields: &[&Argument])
     output
 }
 
-fn generate_from_json_function(class_name: &str, all_fields: &[&Argument]) -> String {
+fn generate_from_json_function(class_name: &str, all_fields: &[NamedArgument]) -> String {
     use faster_freezed::json_serialization::generate_field_from_json;
 
     let mut output = String::new();
@@ -490,8 +450,7 @@ fn generate_from_json_function(class_name: &str, all_fields: &[&Argument]) -> St
         .iter()
         .map(|arg| {
             let field_name = &arg.name;
-            let field_type = &arg.r#type;
-            generate_field_from_json(field_name, field_type, arg)
+            generate_field_from_json(field_name, arg)
         })
         .collect();
 
@@ -500,7 +459,7 @@ fn generate_from_json_function(class_name: &str, all_fields: &[&Argument]) -> St
     output
 }
 
-fn generate_to_json_function(class_name: &str, all_fields: &[&Argument]) -> String {
+fn generate_to_json_function(class_name: &str, all_fields: &[NamedArgument]) -> String {
     use faster_freezed::json_serialization::generate_field_to_json;
 
     let mut output = String::new();
@@ -513,7 +472,7 @@ fn generate_to_json_function(class_name: &str, all_fields: &[&Argument]) -> Stri
         .iter()
         .map(|arg| {
             let field_name = &arg.name;
-            generate_field_to_json(field_name, arg)
+            generate_field_to_json(field_name)
         })
         .collect();
 
@@ -521,4 +480,3 @@ fn generate_to_json_function(class_name: &str, all_fields: &[&Argument]) -> Stri
     output.push_str(",\n};\n");
     output
 }
-
