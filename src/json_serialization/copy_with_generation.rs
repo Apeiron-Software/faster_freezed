@@ -1,8 +1,6 @@
-use std::fmt::{Arguments, Write};
+use std::fmt::Write;
 
-use crate::dart_types::{DartType, ParameterList, PositionalParameter};
-
-const identity: &str = "T _$identity<T>(T value) => value;";
+use crate::dart_types::{DartType, ParameterList};
 
 pub fn generate_mixin_copywith_function(output: &mut String, class_name: &str) {
     let _ = writeln!(
@@ -19,6 +17,25 @@ pub fn generate_abstract_copywith_mixin(
     implements: Option<&str>,
     fields: &ParameterList,
 ) {
+    if fields.get_all_params().is_empty() {
+        let _ = writeln!(
+            output,
+            "class ${class_name}CopyWith<$Res> {}{{",
+            if let Some(class) = implements {
+                format!("implements ${class}CopyWith<$Res> ")
+            } else {
+                "".to_string()
+            }
+        );
+
+        let _ = writeln!(
+            output,
+            "  ${class_name}CopyWith({class_name} value, $Res Function({class_name}) _then);
+  }}"
+        );
+        return;
+    }
+
     let _ = writeln!(
         output,
         "abstract mixin class ${class_name}CopyWith<$Res> {}{{",
@@ -28,6 +45,7 @@ pub fn generate_abstract_copywith_mixin(
             "".to_string()
         }
     );
+
     let _ = writeln!(
         output,
         "  factory ${class_name}CopyWith({class_name} value, $Res Function({class_name}) _then) =
@@ -38,6 +56,8 @@ pub fn generate_abstract_copywith_mixin(
     for field in fields.get_all_params() {
         let _ = writeln!(output, "    {} {},", field.dart_type.as_raw(), field.name);
     }
+
+    let _ = writeln!(output, "// SOSAAAAAAT");
 
     let _ = writeln!(output, "  }});");
     let _ = writeln!(output, "}}");
@@ -76,7 +96,7 @@ pub fn generate_impl_function(
   $Res call({{"
     );
     for field in fields.get_all_params() {
-        if field.dart_type.nullable {
+        if field.dart_type.nullable || field.dart_type.name.is_empty() {
             let _ = writeln!(output, "    Object? {} = freezed,", field.name);
         } else {
             let _ = writeln!(output, "    Object? {} = null,", field.name);
@@ -84,7 +104,6 @@ pub fn generate_impl_function(
     }
 
     if has_constructor {
-        dbg!("hiii??");
         let _ = writeln!(
             output,
             "  }}) {{
@@ -92,7 +111,6 @@ pub fn generate_impl_function(
         );
 
         for pos_field in &fields.positional_parameters {
-            dbg!("WHY THE FUCK IS IT POSITIONAL");
             generate_copywith_element(output, &pos_field.name, &pos_field.dart_type);
             let _ = write!(output, ",");
         }
@@ -126,7 +144,7 @@ pub fn generate_impl_function(
 }
 
 pub fn generate_copywith_element(output: &mut String, name: &str, dart_type: &DartType) {
-    if dart_type.nullable {
+    if dart_type.nullable || dart_type.name.is_empty() {
         let _ = writeln!(
             output,
             "freezed == {name} ? _self.{name} : {name} as {}",

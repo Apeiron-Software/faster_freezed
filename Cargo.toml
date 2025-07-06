@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 lazy_static = "1.5.0"
+memchr = "2.7.5"
+memmap2 = "0.9.5"
 pathdiff = "0.2.3"
 streaming-iterator = "0.1.9"
 tree-sitter = "0.24.7"

@@ -6,20 +6,25 @@ use super::{JsonMethod, generate_mixin_copywith_function, to_json_method_generat
 
 pub fn generate_mixin(
     output: &mut String,
-    mixin_name: &str,
+    mixin_type: &str,
     class_name: &str,
     fields: &[PositionalParameter],
     class_to_json: &JsonMethod,
 ) {
     let _ = writeln!(output, "/// @nodoc");
-    let _ = writeln!(output, "mixin {mixin_name} {{");
+    let _ = writeln!(output, "mixin {mixin_type} {{");
     generate_mixin_getters(output, fields);
     let _ = writeln!(output);
-    generate_eq_operator(output, class_name, fields);
+    generate_eq_operator(output, mixin_type, fields);
     let _ = writeln!(output);
     generate_hash_operator(output, fields);
     let _ = writeln!(output);
-    generate_mixin_copywith_function(output, class_name);
+
+    if !fields.is_empty() {
+        generate_mixin_copywith_function(output, class_name);
+        let _ = writeln!(output);
+    }
+    generate_to_string(output, class_name, fields, false);
     let _ = writeln!(output);
 
     match class_to_json {
@@ -43,14 +48,14 @@ pub fn generate_mixin_getters(output: &mut String, fields: &[PositionalParameter
     }
 }
 
-pub fn generate_eq_operator(output: &mut String, class_name: &str, fields: &[PositionalParameter]) {
+pub fn generate_eq_operator(output: &mut String, mixin_type: &str, fields: &[PositionalParameter]) {
     let _ = writeln!(
         output,
         r#"  @override
   bool operator ==(Object other) {{
     return identical(this, other) ||
       (other.runtimeType == runtimeType &&
-         other is {class_name}"#
+         other is {mixin_type}"#
     );
 
     for field in fields {
@@ -83,6 +88,15 @@ pub fn generate_comparator(output: &mut String, field_name: &str, dart_type: &Da
 }
 
 pub fn generate_hash_operator(output: &mut String, fields: &[PositionalParameter]) {
+    if fields.is_empty() {
+        let _ = writeln!(
+            output,
+            r#"  @override
+  int get hashCode => runtimeType.hashCode;"#
+        );
+        return;
+    }
+
     let _ = writeln!(
         output,
         r#"  @override
@@ -108,11 +122,19 @@ pub fn generate_hash_line(output: &mut String, field_name: &str, dart_type: &Dar
     }
 }
 
-pub fn generate_to_string(output: &mut String, class_name: &str, fields: &[PositionalParameter]) {
+// TODO, toString for generics
+pub fn generate_to_string(
+    output: &mut String,
+    class_name: &str,
+    fields: &[PositionalParameter],
+    override_f: bool,
+) {
+    if override_f {
+        let _ = write!(output, "  @override");
+    }
     let _ = write!(
         output,
-        r#"  @override
-  String toString() {{
+        r#"  String toString() {{
       return '{class_name}("#
     );
 

@@ -14,6 +14,10 @@ pub struct ParameterList {
 }
 
 impl ParameterList {
+    pub fn is_empty(&self) -> bool {
+        self.positional_parameters.is_empty() && self.named_parameters.is_empty()
+    }
+
     pub fn new(
         positional_parameters: Vec<PositionalParameter>,
         named_parameters: Vec<NamedParameter>,
@@ -41,14 +45,6 @@ pub struct PositionalParameter {
     pub annotations: Vec<Annotation>,
 }
 
-impl NamedParameter {
-    pub fn get_default_value(&self) -> Option<String> {
-        // TODO!!!
-        // If annotations contains default, bla bla
-        return None;
-    }
-}
-
 #[derive(Debug, Default)]
 pub struct NamedParameter {
     pub annotations: Vec<Annotation>,
@@ -72,6 +68,33 @@ impl NamedParameter {
 pub struct Annotation {
     pub name: String,
     pub arguments: Vec<String>,
+}
+
+impl Annotation {
+    pub fn get_default_value(&self) -> String {
+        assert_eq!(self.name, "Default");
+        let argument = self.arguments.first().unwrap();
+        // TODO, remoev this shit match
+        match argument.as_str() {
+            "true" | "false" | "null" => {
+                return argument.to_string();
+            }
+            _ if argument.chars().all(|c| c.is_ascii_digit() || c == '.') => {
+                return argument.to_string();
+            }
+            _ if argument.starts_with("'") && argument.ends_with("'") => {
+                return argument.to_string();
+            }
+            _ => {}
+        }
+
+        // Here's fucking GG
+        if argument.ends_with(')') || argument.ends_with(']') || argument.ends_with('}') {
+            format!("const {argument}")
+        } else {
+            argument.to_string()
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
@@ -113,12 +136,10 @@ impl DartType {
 #[derive(Debug)]
 pub struct ClassDefinition {
     pub name: String,
-    // pub type_parameters: Vec<String>, // FEAT: propper generic types
     pub mixins: Vec<DartType>,
     pub json_constructor: Option<RedirectedConstructor>,
     pub unnamed_constructor: Option<RedirectedConstructor>,
     pub redirecting_constructors: Vec<RedirectedConstructor>,
 }
 
-impl ClassDefinition {
-}
+impl ClassDefinition {}

@@ -52,16 +52,21 @@ pub fn parse_dart_code(code: &str) -> Vec<ClassDefinition> {
         query_cursor.matches(&freezed_class_q, tree.root_node(), code.as_bytes());
 
     while let Some(class_with_annotation) = class_with_annotation_matches.next() {
-        // We can get multiple matches, but we only get one freezed annotation
         let _freezed_annotation = class_with_annotation
             .nodes_for_capture_index(0)
             .next()
             .unwrap();
+
+        if get_text(_freezed_annotation, code) != "@freezed" {
+            continue;
+        }
+
         // We can get multiple body matches, but there's only one body
         let class_declaration = class_with_annotation
             .nodes_for_capture_index(1)
             .next()
             .unwrap();
+
         let class_name = class_declaration
             .child_by_field_name("name")
             .unwrap()
@@ -234,11 +239,19 @@ fn parse_class_declaration(node: tree_sitter::Node, code: &str) -> Option<Declar
         };
 
         return Some(DeclarationParseResult::Json(constructor));
-    } else if first_child.kind() == "constructor_signature" {
-        assert_eq!(get_text(first_child.named_child(1).unwrap(), code), "_");
+    } else if ["constructor_signature", "constant_constructor_signature"]
+        .contains(&first_child.kind())
+    {
+        let is_const = first_child.kind() == "constant_constructor_signature";
+        if is_const {
+            assert_eq!(get_text(first_child.named_child(2).unwrap(), code), "_");
+        } else {
+            assert_eq!(get_text(first_child.named_child(1).unwrap(), code), "_");
+        }
 
         let constructor = RedirectedConstructor {
             class_name: "_".to_string(),
+            is_const,
             ..Default::default()
         };
 
@@ -308,7 +321,7 @@ fn parse_formal_parameter_list(node: tree_sitter::Node, code: &str) -> Parameter
             positional_parameters.push(parse_formal_parameter(child, code));
             current_node = child.next_named_sibling();
         } else {
-            dbg!(child.kind());
+            assert!(child.kind() == "optional_formal_parameters");
             break;
         }
     }
@@ -326,6 +339,10 @@ fn parse_formal_parameter_list(node: tree_sitter::Node, code: &str) -> Parameter
         for child in optional_node.children(&mut cursor) {
             let mut was_processed = false;
             while !was_processed {
+                if child.kind() == "comment" {
+                    break;
+                }
+
                 match current_state {
                     FormalParameterSteps::OpenBracket => {
                         assert_eq!(child.kind(), "{");
@@ -335,11 +352,18 @@ fn parse_formal_parameter_list(node: tree_sitter::Node, code: &str) -> Parameter
                     }
                     FormalParameterSteps::Annotations => {
                         assert!(processing_argument);
+
                         if child.kind() == "}" {
                             was_processed = true;
                             current_state = FormalParameterSteps::CloseBracket;
                             continue;
-                        } else if child.kind() == "annotation" {
+                        }
+
+                        if current_argument.is_none() {
+                            current_argument = Some(NamedParameter::default());
+                        }
+
+                        if child.kind() == "annotation" {
                             was_processed = true;
                             let name_node = child.child_by_field_name("name").unwrap();
                             let mut argument_node = name_node
@@ -362,10 +386,6 @@ fn parse_formal_parameter_list(node: tree_sitter::Node, code: &str) -> Parameter
                             was_processed = false;
                             current_state = FormalParameterSteps::Required;
                         }
-
-                        if current_argument.is_none() {
-                            current_argument = Some(NamedParameter::default());
-                        }
                     }
                     FormalParameterSteps::Required => {
                         if child.kind() == "required" {
@@ -380,7 +400,11 @@ fn parse_formal_parameter_list(node: tree_sitter::Node, code: &str) -> Parameter
 
                         current_argument.as_mut().unwrap().name = x.name;
                         current_argument.as_mut().unwrap().dart_type = x.dart_type;
-                        assert!(x.annotations.is_empty());
+                        current_argument
+                            .as_mut()
+                            .unwrap()
+                            .annotations
+                            .extend(x.annotations);
 
                         was_processed = true;
                         current_state = FormalParameterSteps::DefaultValue;
@@ -435,7 +459,6 @@ fn parse_formal_parameter(node: tree_sitter::Node, code: &str) -> PositionalPara
 
     assert_eq!(identifier.kind(), "identifier");
     let argument_name = get_text(identifier, code);
-    dbg!(get_text(identifier, code));
 
     PositionalParameter {
         name: argument_name,
@@ -487,11 +510,15 @@ fn parse_type(node: tree_sitter::Node, code: &str) -> (DartType, usize) {
     let mut current_node = Some(node);
     let mut nullable = false;
 
-    if node.kind() == "record_type" {
-        todo!();
-    }
-
     if let Some(node) = current_node
+        && node.kind() == "record_type"
+    {
+        // TODO
+        name = get_text(node, code);
+
+        processed += 1;
+        current_node = node.next_named_sibling();
+    } else if let Some(node) = current_node
         && node.kind() == "type_identifier"
     {
         name = get_text(node, code);

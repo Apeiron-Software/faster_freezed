@@ -55,8 +55,90 @@ fn from_json_field_gen(
     dart_type: &DartType,
     annotations: &[Annotation],
 ) {
-    let _ = writeln!(output, "({from_item} as {})", dart_type.as_raw());
-    // TODO
+    let mut is_nullable = dart_type.nullable;
+    let mut default_value: String = String::new();
+
+    if let Some(default) = annotations.iter().find(|e| e.name == "Default") {
+        default_value = format!(" ?? {}", default.get_default_value());
+        is_nullable = true;
+    }
+
+    if let Some(converter) = annotations
+        .iter()
+        .find(|e| e.name.ends_with("JsonConverter"))
+    {
+        if is_nullable {
+            let _ = writeln!(
+                output,
+                "
+                ({from_item} == null ? null : const {0}().fromJson({from_item}))
+                ",
+                converter.name
+            );
+        } else {
+            let _ = writeln!(output, "const {0}().fromJson({from_item})", converter.name);
+        }
+    }
+
+    let nullable = if is_nullable { "?" } else { "" };
+
+    match dart_type.name.as_str() {
+        "int" => {
+            assert!(dart_type.type_arguments.is_empty());
+            let _ = writeln!(output, "({from_item} as num{nullable}){nullable}.toInt()");
+        }
+        "double" => {
+            assert!(dart_type.type_arguments.is_empty());
+            let _ = writeln!(
+                output,
+                "({from_item} as num{nullable}){nullable}.toDouble()"
+            );
+        }
+
+        "bool" => {
+            assert!(dart_type.type_arguments.is_empty());
+            let _ = writeln!(output, "(({from_item}) as bool{nullable})");
+        }
+        "String" => {
+            assert!(dart_type.type_arguments.is_empty());
+            let _ = writeln!(output, "(({from_item}) as String{nullable})");
+        }
+        "DateTime" => {
+            assert!(dart_type.type_arguments.is_empty());
+            if is_nullable {
+                let _ = writeln!(
+                    output,
+                    "({from_item} == null ? null : DateTime.parse({from_item} as String))"
+                );
+            } else {
+                let _ = writeln!(output, "DateTime.parse({from_item} as String)");
+            }
+        }
+        "List" => {
+            assert_eq!(dart_type.type_arguments.len(), 1);
+            let mut inner_output = String::new();
+            let inner_type = dart_type.type_arguments.first().unwrap();
+            from_json_field_gen(&mut inner_output, "e", inner_type, &[]);
+
+            let _ = writeln!(
+                output,
+                "({from_item} as List<dynamic>{nullable}){nullable}.map(
+    (e) => {0} ).toList()",
+                &inner_output
+            );
+        }
+
+        "" | "dynamic" => {
+            let _ = writeln!(output, "{from_item}");
+        }
+
+        // If there's no pattern matched, then assume this is an object with .fromJson method
+        _ => {
+            let _ = writeln!(output, "{0}.fromJson({from_item})", dart_type.as_raw());
+        }
+    }
+
+    let _ = writeln!(output, "{default_value}");
 }
 
 pub fn to_json_method_generator(output: &mut String, class_name: Option<&str>) {
@@ -92,6 +174,28 @@ pub fn to_json_function_generator(
 }
 
 fn to_json_field_gen(output: &mut String, parameter: &PositionalParameter) {
+    if let Some(converter) = parameter
+        .annotations
+        .iter()
+        .find(|e| e.name.ends_with("JsonConverter"))
+    {
+        if parameter.dart_type.nullable {
+            let _ = writeln!(
+                output,
+                "
+                (instance.{0} == null ? null : const {1}().toJson(instance.{0}))
+                ",
+                parameter.name, converter.name
+            );
+        } else {
+            let _ = writeln!(
+                output,
+                "const {1}().toJson(instance.{0})",
+                parameter.name, converter.name
+            );
+        }
+    }
+
     if parameter.dart_type.name == "DateTime" {
         let nullable = if parameter.dart_type.nullable {
             "?"
