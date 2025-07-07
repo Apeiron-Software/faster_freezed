@@ -133,6 +133,22 @@ impl DartType {
     }
 }
 
+pub fn get_generic_string(types: &[DartType]) -> String {
+    if types.is_empty() {
+        return "".to_string();
+    }
+    let mut output = String::new();
+    output.push('<');
+    output.push_str(&types.first().unwrap().as_raw());
+    for dart_type in &types[1..] {
+        output.push_str(", ");
+        output.push_str(&dart_type.as_raw());
+    }
+
+    output.push('>');
+    output
+}
+
 #[derive(Debug)]
 pub struct ClassDefinition {
     pub name: String,

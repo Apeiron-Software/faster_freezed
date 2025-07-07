@@ -1,28 +1,43 @@
 use std::fmt::Write;
 
-use crate::dart_types::{DartType, ParameterList};
+use crate::dart_types::{DartType, ParameterList, get_generic_string};
 
-pub fn generate_mixin_copywith_function(output: &mut String, class_name: &str) {
+pub fn generate_mixin_copywith_function(
+    output: &mut String,
+    class_name: &str,
+    copywith_use_generics: &str,
+    class_generics: &str,
+) {
     let _ = writeln!(
         output,
         "  @pragma('vm:prefer-inline')
-  ${class_name}CopyWith<{class_name}> get copyWith =>
-    _${class_name}CopyWithImpl<{class_name}>(this as {class_name}, _$identity);"
+  ${class_name}CopyWith{copywith_use_generics} get copyWith =>
+    _${class_name}CopyWithImpl{copywith_use_generics}(this as {class_name}{class_generics}, _$identity);"
     );
 }
 
 pub fn generate_abstract_copywith_mixin(
     output: &mut String,
     class_name: &str,
+    class_generics: &[DartType],
     implements: Option<&str>,
     fields: &ParameterList,
 ) {
+    let mut copywith_generics = class_generics.to_owned();
+    copywith_generics.push(DartType {
+        name: "$Res".to_string(),
+        ..Default::default()
+    });
+
+    let just_generics = get_generic_string(class_generics);
+    let copywith_generics = get_generic_string(&copywith_generics);
+
     if fields.get_all_params().is_empty() {
         let _ = writeln!(
             output,
-            "class ${class_name}CopyWith<$Res> {}{{",
+            "class ${class_name}CopyWith{copywith_generics} {}{{",
             if let Some(class) = implements {
-                format!("implements ${class}CopyWith<$Res> ")
+                format!("implements ${class}CopyWith{copywith_generics} ")
             } else {
                 "".to_string()
             }
@@ -30,7 +45,7 @@ pub fn generate_abstract_copywith_mixin(
 
         let _ = writeln!(
             output,
-            "  ${class_name}CopyWith({class_name} value, $Res Function({class_name}) _then);
+            "  ${class_name}CopyWith({class_name}{just_generics} value, $Res Function({class_name}) _then);
   }}"
         );
         return;
@@ -38,9 +53,9 @@ pub fn generate_abstract_copywith_mixin(
 
     let _ = writeln!(
         output,
-        "abstract mixin class ${class_name}CopyWith<$Res> {}{{",
+        "abstract mixin class ${class_name}CopyWith{copywith_generics} {}{{",
         if let Some(class) = implements {
-            format!("implements ${class}CopyWith<$Res> ")
+            format!("implements ${class}CopyWith{copywith_generics} ")
         } else {
             "".to_string()
         }
@@ -48,7 +63,7 @@ pub fn generate_abstract_copywith_mixin(
 
     let _ = writeln!(
         output,
-        "  factory ${class_name}CopyWith({class_name} value, $Res Function({class_name}) _then) =
+        "  factory ${class_name}CopyWith({class_name}{just_generics} value, $Res Function({class_name}) _then) =
       _${class_name}CopyWithImpl;
   $Res call({{"
     );
@@ -66,16 +81,26 @@ pub fn generate_abstract_copywith_mixin(
 pub fn generate_copywith_impl_mixin(
     output: &mut String,
     class_name: &str,
+    class_generics: &[DartType],
     fields: &ParameterList,
     has_constructor: bool,
 ) {
+    let mut copywith_generics = class_generics.to_owned();
+    copywith_generics.push(DartType {
+        name: "$Res".to_string(),
+        ..Default::default()
+    });
+
+    let just_generics = get_generic_string(class_generics);
+    let copywith_generics = get_generic_string(&copywith_generics);
+
     let _ = writeln!(
         output,
-        "class _${class_name}CopyWithImpl<$Res> implements ${class_name}CopyWith<$Res> {{
+        "class _${class_name}CopyWithImpl{copywith_generics} implements ${class_name}CopyWith{copywith_generics} {{
   _${class_name}CopyWithImpl(this._self, this._then);
   
-  final {class_name} _self;
-  final $Res Function({class_name}) _then;
+  final {class_name}{just_generics} _self;
+  final $Res Function({class_name}{just_generics}) _then;
 "
     );
     generate_impl_function(output, class_name, fields, has_constructor);

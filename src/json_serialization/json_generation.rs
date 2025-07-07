@@ -78,63 +78,62 @@ fn from_json_field_gen(
         } else {
             let _ = writeln!(output, "const {0}().fromJson({from_item})", converter.name);
         }
-    }
-
-    let nullable = if is_nullable { "?" } else { "" };
-
-    match dart_type.name.as_str() {
-        "int" => {
-            assert!(dart_type.type_arguments.is_empty());
-            let _ = writeln!(output, "({from_item} as num{nullable}){nullable}.toInt()");
-        }
-        "double" => {
-            assert!(dart_type.type_arguments.is_empty());
-            let _ = writeln!(
-                output,
-                "({from_item} as num{nullable}){nullable}.toDouble()"
-            );
-        }
-
-        "bool" => {
-            assert!(dart_type.type_arguments.is_empty());
-            let _ = writeln!(output, "(({from_item}) as bool{nullable})");
-        }
-        "String" => {
-            assert!(dart_type.type_arguments.is_empty());
-            let _ = writeln!(output, "(({from_item}) as String{nullable})");
-        }
-        "DateTime" => {
-            assert!(dart_type.type_arguments.is_empty());
-            if is_nullable {
+    } else {
+        let nullable = if is_nullable { "?" } else { "" };
+        match dart_type.name.as_str() {
+            "int" => {
+                assert!(dart_type.type_arguments.is_empty());
+                let _ = writeln!(output, "({from_item} as num{nullable}){nullable}.toInt()");
+            }
+            "double" => {
+                assert!(dart_type.type_arguments.is_empty());
                 let _ = writeln!(
                     output,
-                    "({from_item} == null ? null : DateTime.parse({from_item} as String))"
+                    "({from_item} as num{nullable}){nullable}.toDouble()"
                 );
-            } else {
-                let _ = writeln!(output, "DateTime.parse({from_item} as String)");
             }
-        }
-        "List" => {
-            assert_eq!(dart_type.type_arguments.len(), 1);
-            let mut inner_output = String::new();
-            let inner_type = dart_type.type_arguments.first().unwrap();
-            from_json_field_gen(&mut inner_output, "e", inner_type, &[]);
 
-            let _ = writeln!(
-                output,
-                "({from_item} as List<dynamic>{nullable}){nullable}.map(
+            "bool" => {
+                assert!(dart_type.type_arguments.is_empty());
+                let _ = writeln!(output, "(({from_item}) as bool{nullable})");
+            }
+            "String" => {
+                assert!(dart_type.type_arguments.is_empty());
+                let _ = writeln!(output, "(({from_item}) as String{nullable})");
+            }
+            "DateTime" => {
+                assert!(dart_type.type_arguments.is_empty());
+                if is_nullable {
+                    let _ = writeln!(
+                        output,
+                        "({from_item} == null ? null : DateTime.parse({from_item} as String))"
+                    );
+                } else {
+                    let _ = writeln!(output, "DateTime.parse({from_item} as String)");
+                }
+            }
+            "List" => {
+                assert_eq!(dart_type.type_arguments.len(), 1);
+                let mut inner_output = String::new();
+                let inner_type = dart_type.type_arguments.first().unwrap();
+                from_json_field_gen(&mut inner_output, "e", inner_type, &[]);
+
+                let _ = writeln!(
+                    output,
+                    "({from_item} as List<dynamic>{nullable}){nullable}.map(
     (e) => {0} ).toList()",
-                &inner_output
-            );
-        }
+                    &inner_output
+                );
+            }
 
-        "" | "dynamic" => {
-            let _ = writeln!(output, "{from_item}");
-        }
+            "" | "dynamic" => {
+                let _ = writeln!(output, "{from_item}");
+            }
 
-        // If there's no pattern matched, then assume this is an object with .fromJson method
-        _ => {
-            let _ = writeln!(output, "{0}.fromJson({from_item})", dart_type.as_raw());
+            // If there's no pattern matched, then assume this is an object with .fromJson method
+            _ => {
+                let _ = writeln!(output, "{0}.fromJson({from_item})", dart_type.as_raw());
+            }
         }
     }
 
@@ -174,6 +173,8 @@ pub fn to_json_function_generator(
 }
 
 fn to_json_field_gen(output: &mut String, parameter: &PositionalParameter) {
+    let _ = write!(output, "'{}': ", parameter.name);
+
     if let Some(converter) = parameter
         .annotations
         .iter()
@@ -183,7 +184,7 @@ fn to_json_field_gen(output: &mut String, parameter: &PositionalParameter) {
             let _ = writeln!(
                 output,
                 "
-                (instance.{0} == null ? null : const {1}().toJson(instance.{0}))
+                (instance.{0} == null ? null : const {1}().toJson(instance.{0}!))
                 ",
                 parameter.name, converter.name
             );
@@ -194,9 +195,7 @@ fn to_json_field_gen(output: &mut String, parameter: &PositionalParameter) {
                 parameter.name, converter.name
             );
         }
-    }
-
-    if parameter.dart_type.name == "DateTime" {
+    } else if parameter.dart_type.name == "DateTime" {
         let nullable = if parameter.dart_type.nullable {
             "?"
         } else {
@@ -205,10 +204,10 @@ fn to_json_field_gen(output: &mut String, parameter: &PositionalParameter) {
 
         let _ = write!(
             output,
-            "'{0}': instance.{0}{nullable}.toIso8601String()",
+            "instance.{0}{nullable}.toIso8601String()",
             parameter.name
         );
     } else {
-        let _ = write!(output, "'{0}': instance.{0}", parameter.name);
+        let _ = write!(output, "instance.{0}", parameter.name);
     }
 }

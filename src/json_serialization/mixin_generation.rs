@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use crate::dart_types::{DartType, PositionalParameter};
+use crate::dart_types::{DartType, PositionalParameter, get_generic_string};
 
 use super::{JsonMethod, generate_mixin_copywith_function, to_json_method_generator};
 
@@ -8,6 +8,7 @@ pub fn generate_mixin(
     output: &mut String,
     mixin_type: &str,
     class_name: &str,
+    class_generics: &[DartType],
     fields: &[PositionalParameter],
     class_to_json: &JsonMethod,
 ) {
@@ -20,8 +21,23 @@ pub fn generate_mixin(
     generate_hash_operator(output, fields);
     let _ = writeln!(output);
 
+    let mut copywith_generics = class_generics.to_owned();
+    // That's a warcrime, check if can be done without nesting, just plain
+    copywith_generics.push(DartType {
+        name: DartType {
+            name: class_name.to_string(),
+            type_arguments: class_generics.to_owned(),
+            nullable: false,
+        }
+        .as_raw(), // I could be worse, but like the fuck?
+        ..Default::default()
+    });
+
+    let just_generics = get_generic_string(class_generics);
+    let copywith_generics = get_generic_string(&copywith_generics);
+
     if !fields.is_empty() {
-        generate_mixin_copywith_function(output, class_name);
+        generate_mixin_copywith_function(output, class_name, &copywith_generics, &just_generics);
         let _ = writeln!(output);
     }
     generate_to_string(output, class_name, fields, false);
@@ -97,12 +113,21 @@ pub fn generate_hash_operator(output: &mut String, fields: &[PositionalParameter
         return;
     }
 
-    let _ = writeln!(
-        output,
-        r#"  @override
+    if fields.len() > 20 {
+        let _ = writeln!(
+            output,
+            r#"  @override
+  int get hashCode => Object.hashAll([
+    runtimeType,"#
+        );
+    } else {
+        let _ = writeln!(
+            output,
+            r#"  @override
   int get hashCode => Object.hash(
     runtimeType,"#
-    );
+        );
+    }
 
     for field in fields {
         let _ = write!(output, "    ");
@@ -110,7 +135,11 @@ pub fn generate_hash_operator(output: &mut String, fields: &[PositionalParameter
         let _ = writeln!(output, ",");
     }
 
-    let _ = writeln!(output, r#"  );"#);
+    if fields.len() > 20 {
+        let _ = writeln!(output, r#"  ]);"#);
+    } else {
+        let _ = writeln!(output, r#"  );"#);
+    }
 }
 
 pub fn generate_hash_line(output: &mut String, field_name: &str, dart_type: &DartType) {

@@ -1,5 +1,7 @@
-use crate::dart_types::{NamedParameter, ParameterList, RedirectedConstructor};
-use std::fmt::Write;
+use crate::dart_types::{
+    DartType, NamedParameter, ParameterList, RedirectedConstructor, get_generic_string,
+};
+use std::fmt::{Write, format};
 
 use super::{
     generate_eq_operator, generate_hash_operator, generate_mixin_copywith_function,
@@ -15,20 +17,34 @@ pub enum JsonMethod {
 pub fn generate_solo_class(
     output: &mut String,
     class_name: &str,
+    class_generics: &[DartType],
     class_to_json: JsonMethod,
     redirected_name: &str,
     parameters: &ParameterList,
     is_const: bool,
     unnamed_constructor: &Option<RedirectedConstructor>,
 ) {
+    let mut copywith_generics = class_generics.to_owned();
+    copywith_generics.push(DartType {
+        name: "$Res".to_string(),
+        ..Default::default()
+    });
+
+    let just_generics = get_generic_string(class_generics);
+    let copywith_generics = get_generic_string(&copywith_generics);
+    let redirected_type = format!("{redirected_name}{just_generics}");
+
     let superclass;
     if let Some(_) = unnamed_constructor {
-        superclass = format!("extends {class_name} ");
+        superclass = format!("extends {class_name}{just_generics} ");
     } else {
-        superclass = format!("implements {class_name} ");
+        superclass = format!("implements {class_name}{just_generics} ");
     }
 
-    let _ = writeln!(output, "class {redirected_name} {superclass} {{");
+    let _ = writeln!(
+        output,
+        "class {redirected_name}{just_generics} {superclass} {{"
+    );
     if is_const {
         let _ = writeln!(output, "const");
     }
@@ -68,15 +84,33 @@ pub fn generate_solo_class(
         );
     }
 
-    generate_eq_operator(output, redirected_name, &parameters.get_all_params());
+    generate_eq_operator(output, &redirected_type, &parameters.get_all_params());
     let _ = writeln!(output);
     generate_hash_operator(output, &parameters.get_all_params());
     let _ = writeln!(output);
     generate_to_string(output, class_name, &parameters.get_all_params(), true);
     let _ = writeln!(output);
 
+    let mut copywith_use_generics = class_generics.to_owned();
+    // That's a warcrime, check if can be done without nesting, just plain
+    copywith_use_generics.push(DartType {
+        name: DartType {
+            name: class_name.to_string(),
+            type_arguments: class_generics.to_owned(),
+            nullable: false,
+        }
+        .as_raw(), // I could be worse, but like the fuck?
+        ..Default::default()
+    });
+    let copywith_use_generics = get_generic_string(&copywith_use_generics);
+
     if !parameters.is_empty() {
-        generate_mixin_copywith_function(output, redirected_name);
+        generate_mixin_copywith_function(
+            output,
+            redirected_name,
+            &copywith_use_generics,
+            &just_generics,
+        );
         let _ = writeln!(output);
     }
 
