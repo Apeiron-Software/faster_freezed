@@ -72,8 +72,6 @@ pub fn generate_abstract_copywith_mixin(
         let _ = writeln!(output, "    {} {},", field.dart_type.as_raw(), field.name);
     }
 
-    let _ = writeln!(output, "// SOSAAAAAAT");
-
     let _ = writeln!(output, "  }});");
     let _ = writeln!(output, "}}");
 }

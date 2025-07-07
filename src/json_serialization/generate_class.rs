@@ -67,9 +67,6 @@ pub fn generate_class(output: &mut String, json_output: &mut String, class: &Cla
         ..Default::default()
     };
 
-    dbg!(&class.name);
-    dbg!(class.json_constructor.is_some());
-
     let class_to_json = if let Some(_json_constructor) = &class.json_constructor {
         JsonMethod::Signature
     } else {
