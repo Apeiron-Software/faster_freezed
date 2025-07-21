@@ -113,7 +113,7 @@ pub fn generate_hash_operator(output: &mut String, fields: &[PositionalParameter
         return;
     }
 
-    if fields.len() > 20 {
+    if fields.len() > 19 {
         let _ = writeln!(
             output,
             r#"  @override
@@ -135,7 +135,7 @@ pub fn generate_hash_operator(output: &mut String, fields: &[PositionalParameter
         let _ = writeln!(output, ",");
     }
 
-    if fields.len() > 20 {
+    if fields.len() > 19 {
         let _ = writeln!(output, r#"  ]);"#);
     } else {
         let _ = writeln!(output, r#"  );"#);

@@ -1,7 +1,6 @@
 use crate::dart_types::{
-    ClassDefinition, DartType, ParameterList, PositionalParameter, get_generic_string,
+    ClassDefinition, DartType, ParameterList, PositionalParameter,
 };
-use std::fmt::Write;
 
 use super::{
     JsonMethod, from_json_function_generator, generate_abstract_copywith_mixin,
@@ -45,8 +44,8 @@ pub fn generate_class(output: &mut String, json_output: &mut String, class: &Cla
         ..Default::default()
     });
 
-    let just_generics = get_generic_string(&class_generics);
-    let copywith_generics = get_generic_string(&copywith_generics);
+    // let just_generics = get_generic_string(&class_generics);
+    // let copywith_generics = get_generic_string(&copywith_generics);
 
     let mut intersecting_fields = class
         .redirecting_constructors

@@ -1,7 +1,7 @@
 use crate::dart_types::{
     DartType, NamedParameter, ParameterList, RedirectedConstructor, get_generic_string,
 };
-use std::fmt::{Write, format};
+use std::fmt::Write;
 
 use super::{
     generate_eq_operator, generate_hash_operator, generate_mixin_copywith_function,
@@ -14,6 +14,8 @@ pub enum JsonMethod {
     Impl(String),
 }
 
+// maybe later?
+#[allow(clippy::too_many_arguments)]
 pub fn generate_solo_class(
     output: &mut String,
     class_name: &str,
@@ -31,15 +33,13 @@ pub fn generate_solo_class(
     });
 
     let just_generics = get_generic_string(class_generics);
-    let copywith_generics = get_generic_string(&copywith_generics);
     let redirected_type = format!("{redirected_name}{just_generics}");
 
-    let superclass;
-    if let Some(_) = unnamed_constructor {
-        superclass = format!("extends {class_name}{just_generics} ");
+    let superclass = if unnamed_constructor.is_some() {
+        format!("extends {class_name}{just_generics}")
     } else {
-        superclass = format!("implements {class_name}{just_generics} ");
-    }
+        format!("implements {class_name}{just_generics}")
+    };
 
     let _ = writeln!(
         output,

@@ -9,10 +9,6 @@ use tree_sitter::{Parser, QueryCursor};
 const FREEZED_CLASS: &str = "(class_definition (annotation) @freezed_marker) @class_definition";
 const CLASS_MEMBER_DEFINITION: &str =
     "((declaration) @member)\n((factory_constructor_signature) @member)";
-const REDIRECTING_FACTORY_CONSTRUCTOR_SIGNATURE: &str =
-    "(redirecting_factory_constructor_signature) @constructor";
-const FORMAL_PARAMETER: &str = "(formal_parameter) @parameter";
-const UNNAMED_CONSTRUCTOR: &str = "(constructor_signature) @unnamed_constructor";
 
 unsafe extern "C" {
     pub fn tree_sitter_dart() -> tree_sitter::Language;
@@ -24,13 +20,6 @@ lazy_static! {
         tree_sitter::Query::new(&DART_TS, FREEZED_CLASS).expect("hardcoded");
     static ref members_q: tree_sitter::Query =
         tree_sitter::Query::new(&DART_TS, CLASS_MEMBER_DEFINITION).expect("hardcoded");
-    static ref redirecting_factory_q: tree_sitter::Query =
-        tree_sitter::Query::new(&DART_TS, REDIRECTING_FACTORY_CONSTRUCTOR_SIGNATURE,)
-            .expect("hardcoded");
-    static ref formal_parameter_q: tree_sitter::Query =
-        tree_sitter::Query::new(&DART_TS, FORMAL_PARAMETER).expect("hardcoded");
-    static ref unnamed_constructor_q: tree_sitter::Query =
-        tree_sitter::Query::new(&DART_TS, UNNAMED_CONSTRUCTOR).expect("hardcoded");
 }
 
 pub fn get_text(node: tree_sitter::Node, code: &str) -> String {

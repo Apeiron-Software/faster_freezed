@@ -132,7 +132,17 @@ fn from_json_field_gen(
 
             // If there's no pattern matched, then assume this is an object with .fromJson method
             _ => {
-                let _ = writeln!(output, "{0}.fromJson({from_item})", dart_type.as_raw());
+                if dart_type.nullable {
+                    let mut name_not_null = dart_type.clone();
+                    name_not_null.nullable = false;
+                    let _ = writeln!(
+                        output,
+                        "{from_item} == null ? null : {0}.fromJson({from_item})",
+                        name_not_null.as_raw()
+                    );
+                } else {
+                    let _ = writeln!(output, "{0}.fromJson({from_item})", dart_type.as_raw());
+                }
             }
         }
     }

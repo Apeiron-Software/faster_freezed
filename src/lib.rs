@@ -1,5 +1,3 @@
-#![feature(let_chains)]
-
 pub mod dart_types;
 pub mod json_serialization;
 pub mod parser;

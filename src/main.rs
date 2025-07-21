@@ -1,12 +1,7 @@
 use std::env;
-use std::fmt::write;
 use std::fs;
-use std::fs::File;
-use std::fs::OpenOptions;
 use std::fs::read_to_string;
-use std::io::BufReader;
 use std::io::ErrorKind;
-use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -14,20 +9,6 @@ use std::time::Instant;
 
 use faster_freezed::json_serialization::generate_class;
 use faster_freezed::parser::parse_dart_code;
-use memmap2::Mmap;
-use memmap2::MmapOptions;
-
-// fn my_little_test() {
-//     let content = fs::read_to_string("test.dart").unwrap();
-//     let x = &parse_dart_code(&content)[0];
-//     dbg!(x);
-//
-//     let mut output = String::new();
-//
-//     generate_class(&mut output, x);
-//
-//     println!("{output}");
-// }
 
 fn traverse_directory(path: &Path) -> Vec<PathBuf> {
     let Ok(directory) = fs::read_dir(path) else {
@@ -65,10 +46,7 @@ fn traverse_directory(path: &Path) -> Vec<PathBuf> {
 fn process_file(data: &str, path: &Path) {
     let classes = parse_dart_code(data);
     if classes.is_empty() {
-        eprintln!(
-            "Found '@freezed' string in {:?} but couldn't parse it",
-            path
-        );
+        eprintln!("Found '@freezed' string in {path:?} but couldn't parse it",);
         return;
     }
 
@@ -93,8 +71,8 @@ fn process_file(data: &str, path: &Path) {
 
     let mut parent_dir = path.parent().unwrap().to_owned();
     let file_name = path.file_stem().unwrap().to_str().unwrap();
-    let freezed_file_name = format!("{}.freezed.dart", file_name);
-    let json_file_name = format!("{}.g.dart", file_name);
+    let freezed_file_name = format!("{file_name}.freezed.dart");
+    let json_file_name = format!("{file_name}.g.dart");
 
     parent_dir.push("generated");
     let r = std::fs::create_dir(&parent_dir);
@@ -111,6 +89,8 @@ fn process_file(data: &str, path: &Path) {
 
     if g_file.len() > init_g_len {
         std::fs::write(g_file_path, g_file).unwrap();
+    } else if g_file_path.is_file() {
+        std::fs::remove_file(g_file_path).unwrap();
     }
 }
 
@@ -147,7 +127,7 @@ fn main() -> ExitCode {
 
     let parsing_and_generating = start.elapsed();
 
-    println!("Took {:?} to discover file tree", traversing_timer);
+    println!("Took {traversing_timer:?} to discover file tree");
     println!(
         "Found {} freezed files from {} dart files in {:?}",
         files_to_process.len(),
