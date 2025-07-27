@@ -1,5 +1,6 @@
-use crate::dart_types::{
-    ClassDefinition, DartType, ParameterList, PositionalParameter,
+use crate::{
+    dart_types::{ClassDefinition, DartType, ParameterList, PositionalParameter},
+    json_serialization::generate_introspection_class,
 };
 
 use super::{
@@ -80,6 +81,10 @@ pub fn generate_class(output: &mut String, json_output: &mut String, class: &Cla
         &intersecting_fields,
         &class_to_json,
     );
+
+    if class.gen_form {
+        generate_introspection_class(output, &class.name, &intersecting_fields);
+    }
 
     generate_abstract_copywith_mixin(
         output,

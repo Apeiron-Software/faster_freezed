@@ -152,6 +152,7 @@ pub fn get_generic_string(types: &[DartType]) -> String {
 #[derive(Debug)]
 pub struct ClassDefinition {
     pub name: String,
+    pub gen_form: bool,
     pub mixins: Vec<DartType>,
     pub json_constructor: Option<RedirectedConstructor>,
     pub unnamed_constructor: Option<RedirectedConstructor>,

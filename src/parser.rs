@@ -46,6 +46,16 @@ pub fn parse_dart_code(code: &str) -> Vec<ClassDefinition> {
             .next()
             .unwrap();
 
+        let mut gen_form = false;
+        if let Some(element) = _freezed_annotation.next_sibling()
+            && element
+                .utf8_text(code.as_bytes())
+                .unwrap()
+                .contains("@form")
+        {
+            gen_form = true;
+        }
+
         if get_text(_freezed_annotation, code) != "@freezed" {
             continue;
         }
@@ -104,6 +114,7 @@ pub fn parse_dart_code(code: &str) -> Vec<ClassDefinition> {
 
         let freezed_class = ClassDefinition {
             name: class_name.to_string(),
+            gen_form,
             mixins: mixin.into_iter().collect(),
             redirecting_constructors,
             json_constructor,

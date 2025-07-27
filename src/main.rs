@@ -1,4 +1,5 @@
 use std::env;
+use std::fmt::Write;
 use std::fs;
 use std::fs::read_to_string;
 use std::io::ErrorKind;
@@ -57,7 +58,14 @@ fn process_file(data: &str, path: &Path) {
 
     let identity = "\nT _$identity<T>(T value) => value;\n";
 
-    let mut freezed_file = part_of.clone();
+    let mut freezed_file = String::new();
+    let _ = write!(&mut freezed_file, "// dart format width=80
+// coverage:ignore-file
+// GENERATED CODE - DO NOT MODIFY BY HAND
+// ignore_for_file: type=lint, unnecessary_cast
+// ignore_for_file: unused_element, deprecated_member_use, deprecated_member_use_from_same_package, use_function_type_syntax_for_parameters, unnecessary_const, avoid_init_to_null, invalid_override_different_default_values_named, prefer_expression_function_bodies, annotate_overrides, invalid_annotation_target, unnecessary_question_mark
+");
+    freezed_file.push_str(&part_of);
     freezed_file.push_str(identity);
 
     let mut g_file = part_of.clone();

@@ -64,6 +64,44 @@ pub fn generate_mixin_getters(output: &mut String, fields: &[PositionalParameter
     }
 }
 
+pub fn generate_introspection_class(
+    output: &mut String,
+    class_name: &str,
+    fields: &[PositionalParameter],
+) {
+    let _ = writeln!(output, "class {class_name}Fields {{",);
+    for field in fields {
+        let _ = writeln!(
+            output,
+            "  static const {name} = ($get${class_name}${name}, $set${class_name}${name});",
+            name = field.name
+        );
+    }
+    let _ = writeln!(output, "static const $all = {{");
+    for field in fields {
+        let _ = writeln!(output, "  #{name}: {name},", name = field.name);
+    }
+    let _ = writeln!(output, "  }};");
+    let _ = writeln!(output, "}}",);
+    generate_mixin_getset_functions(class_name, output, fields);
+}
+
+pub fn generate_mixin_getset_functions(
+    class_name: &str,
+    output: &mut String,
+    fields: &[PositionalParameter],
+) {
+    for field in fields {
+        let _ = writeln!(
+            output,
+            "{field_type} $get${class_name}${name}({class_name} value) => value.{name};
+  {class_name} $set${class_name}${name}({class_name} data, {field_type} value) => data.copyWith({name}: value);",
+            field_type = field.dart_type.as_raw(),
+            name = field.name
+        );
+    }
+}
+
 pub fn generate_eq_operator(output: &mut String, mixin_type: &str, fields: &[PositionalParameter]) {
     let _ = writeln!(
         output,
