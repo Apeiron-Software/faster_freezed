@@ -103,6 +103,8 @@ fn from_json_field_gen(
             }
             "DateTime" => {
                 assert!(dart_type.type_arguments.is_empty());
+                eprintln!("Warning! DateTime was used without a decorator.");
+                eprintln!("{from_item}");
                 if is_nullable {
                     let _ = writeln!(
                         output,

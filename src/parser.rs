@@ -51,7 +51,7 @@ pub fn parse_dart_code(code: &str) -> Vec<ClassDefinition> {
             && element
                 .utf8_text(code.as_bytes())
                 .unwrap()
-                .contains("@form")
+                .contains("@qform")
         {
             gen_form = true;
         }
@@ -111,6 +111,7 @@ pub fn parse_dart_code(code: &str) -> Vec<ClassDefinition> {
                 }
             }
         }
+
 
         let freezed_class = ClassDefinition {
             name: class_name.to_string(),
@@ -440,6 +441,7 @@ fn parse_formal_parameter_list(node: tree_sitter::Node, code: &str) -> Parameter
         }
         /* current_argument = None; */
     }
+
     ParameterList {
         positional_parameters,
         named_parameters,
